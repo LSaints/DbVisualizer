@@ -1,0 +1,31 @@
+# .NET
+bin/
+obj/
+*.user
+*.suo
+.vs/
+artifacts/
+
+# Node
+node_modules/
+dist/
+coverage/
+
+# Logs
+*.log
+logs/
+
+# Ambiente e segredos
+.env
+.env.*
+!.env.example
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.tmp
+
+# Sistema
+.DS_Store
+Thumbs.db

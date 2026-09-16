@@ -1,0 +1,46 @@
+# Banco de dados do Database Diagram.
+#
+# Sobe o MySQL 8 com o database `erp`, um usuário de somente leitura e aplica
+# automaticamente as migrations de database/migrations/ a cada subida do
+# servidor (via entrypoint-migracoes.sh + tabela `_schema_migrations`).
+#
+# Valores podem ser sobrescritos via .env (ex.: DB_PORT=13306,
+# MYSQL_ROOT_PASSWORD=..., MYSQL_PASSWORD=...).
+#
+#   docker compose up -d
+#   docker compose down -v   # apaga também o volume de dados
+
+name: database-diagram
+
+services:
+  banco:
+    image: mysql:8.0
+    container_name: database-diagram-banco
+    restart: unless-stopped
+    entrypoint:
+      - /usr/local/bin/database-diagram-entrypoint.sh
+    environment:
+      MYSQL_DATABASE: "${MYSQL_DATABASE:-erp}"
+      MYSQL_USER: "${MYSQL_USER:-readonly}"
+      MYSQL_PASSWORD: "${MYSQL_PASSWORD:-segredo}"
+      MYSQL_ROOT_PASSWORD: "${MYSQL_ROOT_PASSWORD:-rootsegredo}"
+    ports:
+      - "${DB_PORT:-3306}:3306"
+    volumes:
+      - dados-do-banco:/var/lib/mysql
+      - ./database/migrations:/migrations:ro
+      - ./database/entrypoint-migracoes.sh:/usr/local/bin/database-diagram-entrypoint.sh:ro
+    healthcheck:
+      test:
+        - CMD
+        - mysqladmin
+        - ping
+        - -uroot
+        - -p${MYSQL_ROOT_PASSWORD:-rootsegredo}
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
+volumes:
+  dados-do-banco:

@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="DatabaseDiagram.Api/DatabaseDiagram.Api.csproj" />
+  <Project Path="DatabaseDiagram.Testes/DatabaseDiagram.Testes.csproj" />
+</Solution>
