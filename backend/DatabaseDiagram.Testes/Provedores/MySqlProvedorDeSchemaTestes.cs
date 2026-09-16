@@ -7,6 +7,45 @@ namespace DatabaseDiagram.Testes.Provedores;
 public class MySqlProvedorDeSchemaTestes
 {
     [Fact]
+    public void MontarEsquema_ComVersao_PreencherCampoVersao()
+    {
+        var esquema = MySqlProvedorDeSchema.MontarEsquema(
+            provedor: "mysql",
+            nomeDoBanco: "erp",
+            charset: null,
+            collation: null,
+            tabelas: [],
+            new Dictionary<string, IReadOnlyList<ColunaDeBanco>>(),
+            [],
+            [],
+            versao: "8.0.35");
+
+        Assert.Equal("8.0.35", esquema.Versao);
+    }
+
+    [Fact]
+    public void MontarEsquema_SemVersao_DeixaCampoNulo()
+    {
+        var esquema = MySqlProvedorDeSchema.MontarEsquema(
+            provedor: "mysql",
+            nomeDoBanco: "erp",
+            charset: null,
+            collation: null,
+            tabelas: [],
+            new Dictionary<string, IReadOnlyList<ColunaDeBanco>>(),
+            [],
+            []);
+
+        Assert.Null(esquema.Versao);
+    }
+
+    [Fact]
+    public void ConsultaDaVersao_EhDeLeitura()
+    {
+        Assert.Matches(@"^\s*SELECT\b", MySqlProvedorDeSchema.ConsultaDaVersao);
+    }
+
+    [Fact]
     public void MontarEsquema_ComMetadados_ConstroiSchemaComFlagsDeChaves()
     {
         var clientes = new TabelaDeBanco { Esquema = "erp", Nome = "clientes" };
@@ -119,7 +158,7 @@ public class MySqlProvedorDeSchemaTestes
     }
 
     [Theory]
-    [InlineData(MySqlProvedorDeSchema.ConsultaDoDatabase)]
+    [InlineData(MySqlProvedorDeSchema.ConsultaDoBanco)]
     [InlineData(MySqlProvedorDeSchema.ConsultaDeTabelas)]
     [InlineData(MySqlProvedorDeSchema.ConsultaDeColunas)]
     [InlineData(MySqlProvedorDeSchema.ConsultaDeChavesPrimarias)]

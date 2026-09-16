@@ -7,7 +7,7 @@ interface Propriedades {
 }
 
 /**
- * Tela de conexão: provider, host, porta, banco de dados, usuário e senha.
+ * Tela de conexão: provedor, host, porta, banco de dados, usuário e senha.
  * Mensagens e rótulos em pt-BR (constituição II).
  */
 export function FormularioDeConexao({
@@ -38,7 +38,7 @@ export function FormularioDeConexao({
       <h2 className="formulario-titulo">Conectar ao banco de dados</h2>
 
       <label className="campo">
-        <span className="campo-rotulo">Provider</span>
+        <span className="campo-rotulo">Provedor</span>
         <select value={provedor} onChange={(evento) => setProvedor(evento.target.value)}>
           <option value="mysql">MySQL</option>
         </select>

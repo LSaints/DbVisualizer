@@ -6,7 +6,7 @@ namespace DatabaseDiagram.Testes.Infraestrutura;
 public class ConfiguradorDeConexaoTestes
 {
     [Fact]
-    public void CriarConnectionString_MontaParametrosEmMemoria()
+    public void CriarStringDeConexao_MontaParametrosEmMemoria()
     {
         var conexao = new ConexaoDeBanco
         {
@@ -18,17 +18,17 @@ public class ConfiguradorDeConexaoTestes
             Senha = "segredo"
         };
 
-        var connectionString = new ConfiguradorDeConexao().CriarConnectionString(conexao);
+        var stringDeConexao = new ConfiguradorDeConexao().CriarStringDeConexao(conexao);
 
-        Assert.Contains("Server=localhost", connectionString);
-        Assert.Contains("Port=3306", connectionString);
-        Assert.Contains("Database=erp", connectionString);
-        Assert.Contains("User ID=readonly", connectionString);
-        Assert.Contains("Password=segredo", connectionString);
+        Assert.Contains("Server=localhost", stringDeConexao);
+        Assert.Contains("Port=3306", stringDeConexao);
+        Assert.Contains("Database=erp", stringDeConexao);
+        Assert.Contains("User ID=readonly", stringDeConexao);
+        Assert.Contains("Password=segredo", stringDeConexao);
     }
 
     [Fact]
-    public void CriarConnectionString_UsaPortaInformada()
+    public void CriarStringDeConexao_UsaPortaInformada()
     {
         var conexao = new ConexaoDeBanco
         {
@@ -40,9 +40,9 @@ public class ConfiguradorDeConexaoTestes
             Senha = "segredo"
         };
 
-        var connectionString = new ConfiguradorDeConexao().CriarConnectionString(conexao);
+        var stringDeConexao = new ConfiguradorDeConexao().CriarStringDeConexao(conexao);
 
-        Assert.Contains("Server=banco.example.com", connectionString);
-        Assert.Contains("Port=3307", connectionString);
+        Assert.Contains("Server=banco.example.com", stringDeConexao);
+        Assert.Contains("Port=3307", stringDeConexao);
     }
 }

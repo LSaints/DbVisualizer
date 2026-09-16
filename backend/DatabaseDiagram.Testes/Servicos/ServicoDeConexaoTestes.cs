@@ -17,7 +17,7 @@ public class ServicoDeConexaoTestes
         var conexao = CriarConexao();
         var servico = new ServicoDeConexao(
             new ConfiguradorDeConexao(),
-            _ => new ConexaoDbFake());
+            _ => new ConexaoDeBancoFalsa());
 
         var resposta = await servico.TestarAsync(conexao, CancellationToken.None);
 
@@ -33,7 +33,7 @@ public class ServicoDeConexaoTestes
         var conexao = CriarConexao(senha: senha);
         var servico = new ServicoDeConexao(
             new ConfiguradorDeConexao(),
-            _ => new ConexaoDbFake(deveFalhar: true));
+            _ => new ConexaoDeBancoFalsa(deveFalhar: true));
 
         var resposta = await servico.TestarAsync(conexao, CancellationToken.None);
 
@@ -46,22 +46,22 @@ public class ServicoDeConexaoTestes
     }
 
     [Fact]
-    public async Task TestarAsync_RepassaAConnectionStringEmMemoria()
+    public async Task TestarAsync_RepassaAStringDeConexaoEmMemoria()
     {
-        var connectionStringsRecebidas = new List<string>();
+        var stringsDeConexaoRecebidas = new List<string>();
         var servico = new ServicoDeConexao(
             new ConfiguradorDeConexao(),
-            connectionString =>
+            stringDeConexao =>
             {
-                connectionStringsRecebidas.Add(connectionString);
-                return new ConexaoDbFake();
+                stringsDeConexaoRecebidas.Add(stringDeConexao);
+                return new ConexaoDeBancoFalsa();
             });
 
         await servico.TestarAsync(CriarConexao(), CancellationToken.None);
 
-        var connectionString = Assert.Single(connectionStringsRecebidas);
-        Assert.Contains("Server=localhost", connectionString);
-        Assert.Contains("Database=erp", connectionString);
+        var stringDeConexao = Assert.Single(stringsDeConexaoRecebidas);
+        Assert.Contains("Server=localhost", stringDeConexao);
+        Assert.Contains("Database=erp", stringDeConexao);
     }
 
     private static ConexaoDeBanco CriarConexao(string senha = "segredo") => new()
@@ -78,7 +78,7 @@ public class ServicoDeConexaoTestes
     /// Conexão <see cref="DbConnection"/> simulada para exercitar o serviço
     /// sem tocar em um MySQL real.
     /// </summary>
-    private sealed class ConexaoDbFake(bool deveFalhar = false) : DbConnection
+    private sealed class ConexaoDeBancoFalsa(bool deveFalhar = false) : DbConnection
     {
         [AllowNull]
         public override string ConnectionString { get; set; } = string.Empty;

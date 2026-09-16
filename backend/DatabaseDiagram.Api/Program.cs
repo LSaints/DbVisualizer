@@ -1,7 +1,10 @@
 using System.Text.Json;
+using DatabaseDiagram.Api.Controladores;
 using DatabaseDiagram.Api.Dtos;
 using DatabaseDiagram.Api.Infraestrutura;
 using DatabaseDiagram.Api.Provedores;
+using DatabaseDiagram.Api.Provedores.Ia.GoogleAiStudio;
+using DatabaseDiagram.Api.Provedores.Ia.OpenAi;
 using DatabaseDiagram.Api.Provedores.MySql;
 using DatabaseDiagram.Api.Servicos;
 using Microsoft.AspNetCore.Http;
@@ -45,12 +48,21 @@ builder.Services.AddRateLimiter(opcoes =>
         config.QueueLimit = 0;
     });
 
+    // Protege o provedor de IA e o servidor de abuso/erros de loop na
+    // geração de consultas (decisão D10).
+    opcoes.AddFixedWindowLimiter("AssistentePorCliente", config =>
+    {
+        config.PermitLimit = 10;
+        config.Window = TimeSpan.FromMinutes(1);
+        config.QueueLimit = 0;
+    });
+
     opcoes.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
     opcoes.OnRejected = async (contexto, cancellationToken) =>
     {
         contexto.HttpContext.Response.ContentType = "application/json";
         await contexto.HttpContext.Response.WriteAsJsonAsync(
-            new { mensagem = "Muitas requisições. Aguarde um instante e tente novamente." },
+            new { mensagem = MensagensDeValidacao.MuitasRequisicoes },
             cancellationToken);
     };
 });
@@ -60,6 +72,29 @@ builder.Services.AddRateLimiter(opcoes =>
 builder.Services.AddSingleton<InterfaceProvedorDeSchema, MySqlProvedorDeSchema>();
 builder.Services.AddSingleton<FabricaDeProvedoresDeSchema>();
 builder.Services.AddSingleton<ServicoDeSchema>();
+
+// Assistente de IA: provedores isolados com contrato comum (constituição IV).
+// O OpenAI usa um HttpClient dedicado com timeout de 90 s (decisão D10); a
+// chave de API é efêmera, por requisição, e nunca é persistida ou logada (D9).
+builder.Services.AddHttpClient(OpenAiProvedorDeIa.NomeDoCliente, cliente =>
+    cliente.Timeout = TimeSpan.FromSeconds(90));
+builder.Services.AddSingleton<InterfaceProvedorDeIa>(provedor =>
+    new OpenAiProvedorDeIa(
+        provedor.GetRequiredService<IHttpClientFactory>()
+            .CreateClient(OpenAiProvedorDeIa.NomeDoCliente)));
+
+// Google AI Studio (Gemini generateContent): o mesmo contrato e o mesmo fluxo;
+// a chave via cabeçalho `x-goog-api-key`, nunca na URL query nem em logs.
+builder.Services.AddHttpClient(GoogleAiStudioProvedorDeIa.NomeDoCliente, cliente =>
+    cliente.Timeout = TimeSpan.FromSeconds(90));
+builder.Services.AddSingleton<InterfaceProvedorDeIa>(provedor =>
+    new GoogleAiStudioProvedorDeIa(
+        provedor.GetRequiredService<IHttpClientFactory>()
+            .CreateClient(GoogleAiStudioProvedorDeIa.NomeDoCliente)));
+
+builder.Services.AddSingleton<FabricaDeProvedoresDeIa>();
+builder.Services.AddSingleton<ConstrutorDeContextoDeBanco>();
+builder.Services.AddSingleton<ServicoDoAssistente>();
 
 var app = builder.Build();
 

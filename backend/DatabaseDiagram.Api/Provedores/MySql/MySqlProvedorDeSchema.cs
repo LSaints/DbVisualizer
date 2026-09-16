@@ -32,10 +32,14 @@ public sealed class MySqlProvedorDeSchema : InterfaceProvedorDeSchema
 
     public string Tipo => TipoDeProvedor.MySql.ToString().ToLowerInvariant();
 
-    internal const string ConsultaDoDatabase = """
+    internal const string ConsultaDoBanco = """
         SELECT DEFAULT_CHARACTER_SET_NAME, DEFAULT_COLLATION_NAME
         FROM information_schema.SCHEMATA
         WHERE SCHEMA_NAME = @bancoDeDados
+        """;
+
+    internal const string ConsultaDaVersao = """
+        SELECT VERSION()
         """;
 
     internal const string ConsultaDeTabelas = """
@@ -89,17 +93,18 @@ public sealed class MySqlProvedorDeSchema : InterfaceProvedorDeSchema
         ORDER BY kcu.ORDINAL_POSITION
         """;
 
-    public async Task<EsquemaDeBanco> ObterSchemaAsync(
+    public async Task<EsquemaDeBanco> ObterEsquemaAsync(
         ConexaoDeBanco conexao,
         CancellationToken cancellationToken)
     {
-        var connectionString = _configurador.CriarConnectionString(conexao);
-        await using var conexaoSql = new MySqlConnection(connectionString);
+        var stringDeConexao = _configurador.CriarStringDeConexao(conexao);
+        await using var conexaoSql = new MySqlConnection(stringDeConexao);
         await conexaoSql.OpenAsync(cancellationToken);
 
         var nomeDoBanco = conexao.BancoDeDados;
 
-        var (charset, collation) = await ObterDatabaseAsync(conexaoSql, nomeDoBanco, cancellationToken);
+        var (charset, collation) = await ObterBancoAsync(conexaoSql, nomeDoBanco, cancellationToken);
+        var versao = await ObterVersaoAsync(conexaoSql, cancellationToken);
 
         var tabelas = await ObterTabelasAsync(conexaoSql, nomeDoBanco, cancellationToken);
 
@@ -137,7 +142,8 @@ public sealed class MySqlProvedorDeSchema : InterfaceProvedorDeSchema
             tabelas,
             colunasPorTabela,
             chavesPrimarias,
-            relacionamentos);
+            relacionamentos,
+            versao);
 
         if (introspeccaoTruncada)
         {
@@ -147,12 +153,12 @@ public sealed class MySqlProvedorDeSchema : InterfaceProvedorDeSchema
         return esquema;
     }
 
-    private static async Task<(string? Charset, string? Collation)> ObterDatabaseAsync(
+    private static async Task<(string? Charset, string? Collation)> ObterBancoAsync(
         MySqlConnection conexaoSql,
         string bancoDeDados,
         CancellationToken cancellationToken)
     {
-        await using var comando = CriarComando(conexaoSql, ConsultaDoDatabase, bancoDeDados);
+        await using var comando = CriarComando(conexaoSql, ConsultaDoBanco, bancoDeDados);
         await using var leitor = await comando.ExecuteReaderAsync(cancellationToken);
 
         if (!await leitor.ReadAsync(cancellationToken))
@@ -161,6 +167,22 @@ public sealed class MySqlProvedorDeSchema : InterfaceProvedorDeSchema
         }
 
         return (ObterStringOpcional(leitor, 0), ObterStringOpcional(leitor, 1));
+    }
+
+    private static async Task<string?> ObterVersaoAsync(
+        MySqlConnection conexaoSql,
+        CancellationToken cancellationToken)
+    {
+        await using var comando = new MySqlCommand(ConsultaDaVersao, conexaoSql)
+        {
+            CommandType = CommandType.Text,
+            CommandTimeout = TimeoutDoComandoEmSegundos
+        };
+        await using var leitor = await comando.ExecuteReaderAsync(cancellationToken);
+
+        return await leitor.ReadAsync(cancellationToken)
+            ? leitor.GetString(0)
+            : null;
     }
 
     private static async Task<List<TabelaDeBanco>> ObterTabelasAsync(
@@ -311,7 +333,8 @@ public sealed class MySqlProvedorDeSchema : InterfaceProvedorDeSchema
         IReadOnlyCollection<TabelaDeBanco> tabelas,
         IReadOnlyDictionary<string, IReadOnlyList<ColunaDeBanco>> colunasPorTabela,
         IReadOnlyCollection<(string Esquema, string Tabela, string Coluna)> chavesPrimarias,
-        IReadOnlyCollection<RelacionamentoDeBanco> relacionamentos)
+        IReadOnlyCollection<RelacionamentoDeBanco> relacionamentos,
+        string? versao = null)
     {
         var colunasPk = chavesPrimarias
             .Select(c => ChaveDaColuna(c.Esquema, c.Tabela, c.Coluna))
@@ -348,6 +371,7 @@ public sealed class MySqlProvedorDeSchema : InterfaceProvedorDeSchema
         {
             Provedor = provedor,
             NomeDoBanco = nomeDoBanco,
+            Versao = versao,
             Charset = charset,
             Collation = collation,
             Tabelas = [.. tabelas],

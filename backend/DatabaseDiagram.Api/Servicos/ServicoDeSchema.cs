@@ -38,7 +38,7 @@ public sealed class ServicoDeSchema
         ConexaoDeBanco conexao,
         CancellationToken cancellationToken)
     {
-        var provedor = _fabrica.ObterProvider(conexao.Provedor)
+        var provedor = _fabrica.ObterProvedor(conexao.Provedor)
             ?? throw new ProvedorNaoSuportadoException(conexao.Provedor);
 
         if (!await _portaoDeConcorrencia.WaitAsync(_tempoMaximoDeEspera, cancellationToken))
@@ -49,7 +49,7 @@ public sealed class ServicoDeSchema
 
         try
         {
-            return await provedor.ObterSchemaAsync(conexao, cancellationToken);
+            return await provedor.ObterEsquemaAsync(conexao, cancellationToken);
         }
         finally
         {

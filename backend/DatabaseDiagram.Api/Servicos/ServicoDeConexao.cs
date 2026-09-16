@@ -9,7 +9,7 @@ using MySqlConnector;
 namespace DatabaseDiagram.Api.Servicos;
 
 /// <summary>
-/// Testa uma conexão sem armazená-la. A senha e a connection string nunca são
+/// Testa uma conexão sem armazená-la. A senha e a string de conexão nunca são
 /// retornadas nem logadas (constituição III); mensagens de erro são genéricas.
 /// </summary>
 public sealed class ServicoDeConexao
@@ -18,7 +18,7 @@ public sealed class ServicoDeConexao
     private readonly Func<string, DbConnection> _criarConexao;
 
     public ServicoDeConexao(ConfiguradorDeConexao configurador)
-        : this(configurador, connectionString => new MySqlConnection(connectionString))
+        : this(configurador, stringDeConexao => new MySqlConnection(stringDeConexao))
     {
     }
 
@@ -32,9 +32,9 @@ public sealed class ServicoDeConexao
         ConexaoDeBanco conexao,
         CancellationToken cancellationToken)
     {
-        var connectionString = _configurador.CriarConnectionString(conexao);
+        var stringDeConexao = _configurador.CriarStringDeConexao(conexao);
 
-        await using var conexaoAbra = _criarConexao(connectionString);
+        await using var conexaoAbra = _criarConexao(stringDeConexao);
 
         try
         {

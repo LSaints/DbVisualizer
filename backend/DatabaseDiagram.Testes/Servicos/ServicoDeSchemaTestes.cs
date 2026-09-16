@@ -9,7 +9,7 @@ namespace DatabaseDiagram.Testes.Servicos;
 public class ServicoDeSchemaTestes
 {
     [Fact]
-    public async Task ObterAsync_ComProviderRegistrado_RetornaEsquemaDoProvider()
+    public async Task ObterAsync_ComProvedorRegistrado_RetornaEsquemaDoProvedor()
     {
         var esperado = new EsquemaDeBanco
         {
@@ -28,7 +28,7 @@ public class ServicoDeSchemaTestes
     }
 
     [Fact]
-    public async Task ObterAsync_ComProviderDesconhecido_LancaProvedorNaoSuportado()
+    public async Task ObterAsync_ComProvedorDesconhecido_LancaProvedorNaoSuportado()
     {
         var fabrica = new FabricaDeProvedoresDeSchema([new ProvedorFalso()]);
         var servico = new ServicoDeSchema(fabrica);
@@ -113,7 +113,7 @@ public class ServicoDeSchemaTestes
 
         public string Tipo => "mysql";
 
-        public Task<EsquemaDeBanco> ObterSchemaAsync(
+        public Task<EsquemaDeBanco> ObterEsquemaAsync(
             ConexaoDeBanco conexao,
             CancellationToken cancellationToken) =>
             Task.FromResult(_esquema);
@@ -128,7 +128,7 @@ public class ServicoDeSchemaTestes
 
         public string Tipo => "mysql";
 
-        public async Task<EsquemaDeBanco> ObterSchemaAsync(
+        public async Task<EsquemaDeBanco> ObterEsquemaAsync(
             ConexaoDeBanco conexao,
             CancellationToken cancellationToken)
         {

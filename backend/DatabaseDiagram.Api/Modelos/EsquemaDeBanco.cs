@@ -7,6 +7,9 @@ public sealed class EsquemaDeBanco
 
     public required string NomeDoBanco { get; init; }
 
+    /// <summary>Versão do banco reportada pelo provider, ex.: <c>8.0.35</c>.</summary>
+    public string? Versao { get; init; }
+
     /// <summary>Charset default, quando disponível.</summary>
     public string? Charset { get; init; }
 

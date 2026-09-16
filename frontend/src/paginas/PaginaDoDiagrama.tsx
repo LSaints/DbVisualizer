@@ -181,7 +181,7 @@ export function PaginaDoDiagrama({ esquema, aoDesconectar }: Propriedades) {
       <header className="barra-superior">
         <div className="informacoes-da-conexao">
           <span className="nome-do-banco">{esquema.nomeDoBanco}</span>
-          <span className="provider-do-banco">{esquema.provedor}</span>
+          <span className="provedor-do-banco">{esquema.provedor}</span>
           <button className="botao-secundario" onClick={aoDesconectar}>
             Nova conexão
           </button>

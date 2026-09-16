@@ -17,7 +17,9 @@ MYSQL_PASSWORD="${MYSQL_PASSWORD:-segredo}"
 MYSQL_ROOT_PASSWORD="${MYSQL_ROOT_PASSWORD:-rootsegredo}"
 
 DATADIR="/var/lib/mysql"
-SOQUETE="/run/mysqld/mysqld.sock"
+# Socket próprio do servidor temporário (isola daquele usado pelo mysqld
+# definitivo, evitando colisão a cada subida do container).
+SOQUETE="/run/mysqld/migracao.sock"
 MIGRACOES="/migrations"
 
 log() { echo ">> $*"; }
@@ -39,6 +41,9 @@ fi
 mkdir -p "$(dirname "$SOQUETE")"
 chown mysql:mysql "$(dirname "$SOQUETE")" 2>/dev/null || true
 
+# Remove eventuais arquivos residuais do servidor temporário (restart/crash).
+rm -f "$SOQUETE" "$SOQUETE.lock" /run/mysqld/servidor-temporario.pid
+
 # 2) Servidor temporário local (sem rede) para bootstrap e migrations.
 log "Iniciando servidor temporário..."
 mysqld \
@@ -49,9 +54,19 @@ mysqld \
   --pid-file=/run/mysqld/servidor-temporario.pid &
 PID_TEMP=$!
 
+# Aguarda ficar pronto detectando a autenticação root vigente: data dir novo
+# (root sem senha) ou já inicializado (senha de MYSQL_ROOT_PASSWORD).
+ROOT_AUTH=()
+
 aguardar_pronto() {
   for _ in $(seq 1 60); do
     if mysql --socket="$SOQUETE" -uroot -e "SELECT 1" >/dev/null 2>&1; then
+      ROOT_AUTH=()
+      return 0
+    fi
+    if [ -n "$MYSQL_ROOT_PASSWORD" ] && \
+       mysql --socket="$SOQUETE" -uroot -p"$MYSQL_ROOT_PASSWORD" -e "SELECT 1" >/dev/null 2>&1; then
+      ROOT_AUTH=(-p"$MYSQL_ROOT_PASSWORD")
       return 0
     fi
     sleep 1
@@ -64,20 +79,7 @@ if ! aguardar_pronto; then
   exit 1
 fi
 
-# Autenticação root: data dir novo não tem senha; senão usa a definida.
-ROOT_AUTH=()
-if ! mysql --socket="$SOQUETE" -uroot -e "SELECT 1" >/dev/null 2>&1; then
-  if [ -n "$MYSQL_ROOT_PASSWORD" ] && \
-     mysql --socket="$SOQUETE" -uroot -p"$MYSQL_ROOT_PASSWORD" -e "SELECT 1" >/dev/null 2>&1; then
-    ROOT_AUTH=(-p"$MYSQL_ROOT_PASSWORD")
-  else
-    echo "Falha de autenticação root no servidor temporário." >&2
-    exit 1
-  fi
-fi
-
 mysql_raiz() { mysql --socket="$SOQUETE" -uroot "${ROOT_AUTH[@]}" "$@"; }
-mysqladmin_raiz() { mysqladmin --socket="$SOQUETE" -uroot "${ROOT_AUTH[@]}" "$@"; }
 
 # 3) Database + usuário de somente leitura (constituição III).
 log "Configurando database '$MYSQL_DATABASE' e usuário '$MYSQL_USER'..."
@@ -113,7 +115,7 @@ for migracao in "$MIGRACOES"/*.sql; do
   log "Aplicando migração $nome..."
   if ! mysql_raiz "$MYSQL_DATABASE" < "$migracao"; then
     echo "Falha ao aplicar a migração $nome." >&2
-    mysqladmin_raiz shutdown >/dev/null 2>&1 || true
+    kill -TERM "$PID_TEMP" 2>/dev/null || true
     exit 1
   fi
   mysql_raiz -e \
@@ -125,11 +127,13 @@ if [ "$FRESCO" = "1" ] && [ -n "$MYSQL_ROOT_PASSWORD" ]; then
   log "Definindo senha do usuário root..."
   mysql_raiz -e \
     "ALTER USER 'root'@'localhost' IDENTIFIED BY '$MYSQL_ROOT_PASSWORD'; FLUSH PRIVILEGES;"
+  ROOT_AUTH=(-p"$MYSQL_ROOT_PASSWORD")
 fi
 
-# 6) Encerra o servidor temporário e sobe o definitivo em foreground.
+# 6) Encerra o servidor temporário (SIGTERM, sem depender de auth) e sobe o
+#    definitivo em foreground.
 log "Desligando servidor temporário..."
-mysqladmin_raiz shutdown >/dev/null 2>&1 || true
+kill -TERM "$PID_TEMP" 2>/dev/null || true
 wait "$PID_TEMP" 2>/dev/null || true
 PID_TEMP=""
 rm -f "$SOQUETE"

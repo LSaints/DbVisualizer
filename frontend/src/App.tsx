@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { FormularioDeConexao } from './componentes/FormularioDeConexao';
 import type { ConexaoDeBanco, EsquemaDeBanco } from './modelos/tipos';
+import { PaginaDoAssistente } from './paginas/PaginaDoAssistente';
 import { PaginaDoDiagrama } from './paginas/PaginaDoDiagrama';
 import { obterEsquema, testarConexao } from './servicos/ApiDiagrama';
 
@@ -11,6 +12,8 @@ type EstadoDaAplicacao =
   | { tipo: 'sucesso'; conexao: ConexaoDeBanco; esquema: EsquemaDeBanco }
   | { tipo: 'erro'; conexao: ConexaoDeBanco; mensagem: string };
 
+type Tela = 'diagrama' | 'assistente';
+
 /**
  * Estados da interface (spec.md, FR-024): desconectado, conectando,
  * carregando schema, sucesso e erro — mensagens em pt-BR geradas conforme o
@@ -18,6 +21,7 @@ type EstadoDaAplicacao =
  */
 export function App() {
   const [estado, setEstado] = useState<EstadoDaAplicacao>({ tipo: 'desconectado' });
+  const [tela, setTela] = useState<Tela>('diagrama');
 
   async function conectar(conexao: ConexaoDeBanco): Promise<void> {
     setEstado({ tipo: 'conectando', conexao });
@@ -52,6 +56,7 @@ export function App() {
 
   function desconectar(): void {
     setEstado({ tipo: 'desconectado' });
+    setTela('diagrama');
   }
 
   const mensagensDeStatus: Record<string, string> = {
@@ -73,10 +78,33 @@ export function App() {
             Schema {estado.esquema.provedor} carregado.
           </p>
         )}
+        {estado.tipo === 'sucesso' && (
+          <nav className="navegacao-da-aplicacao" aria-label="Navegação">
+            <button
+              type="button"
+              className={tela === 'diagrama' ? 'botao-secundario ativo' : 'botao-secundario'}
+              onClick={() => setTela('diagrama')}
+            >
+              Diagrama
+            </button>
+            <button
+              type="button"
+              className={tela === 'assistente' ? 'botao-secundario ativo' : 'botao-secundario'}
+              onClick={() => setTela('assistente')}
+            >
+              Assistente de IA
+            </button>
+          </nav>
+        )}
       </header>
 
       <main className="conteudo">
-        {estado.tipo === 'sucesso' ? (
+        {estado.tipo === 'sucesso' && tela === 'assistente' ? (
+          <PaginaDoAssistente
+            contextoDeBanco={estado.esquema}
+            aoVoltar={() => setTela('diagrama')}
+          />
+        ) : estado.tipo === 'sucesso' ? (
           <PaginaDoDiagrama
             esquema={estado.esquema}
             aoDesconectar={desconectar}

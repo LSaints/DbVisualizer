@@ -17,6 +17,8 @@ export interface ConexaoDeBanco {
 export interface EsquemaDeBanco {
   provedor: string;
   nomeDoBanco: string;
+  /** Versão do banco reportada pelo provider, ex.: `8.0.35`. */
+  versao?: string | null;
   charset?: string | null;
   collation?: string | null;
   tabelas: TabelaDeBanco[];

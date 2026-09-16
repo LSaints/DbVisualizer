@@ -4,17 +4,17 @@ using MySqlConnector;
 namespace DatabaseDiagram.Api.Infraestrutura;
 
 /// <summary>
-/// Constrói a connection string em memória a partir de uma
+/// Constrói a string de conexão em memória a partir de uma
 /// <see cref="ConexaoDeBanco"/>. Nunca é persistida, retornada ou logada.
 /// </summary>
 public sealed class ConfiguradorDeConexao
 {
     /// <summary>
-    /// Cria a connection string usando <see cref="MySqlConnectionStringBuilder"/>
+    /// Cria a string de conexão usando <see cref="MySqlConnectionStringBuilder"/>
     /// (somente em memória). A string resultante contém a senha e não deve ser
     /// utilizada em respostas ou logs.
     /// </summary>
-    public string CriarConnectionString(ConexaoDeBanco conexao)
+    public string CriarStringDeConexao(ConexaoDeBanco conexao)
     {
         return new MySqlConnectionStringBuilder
         {
