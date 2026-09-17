@@ -1,4 +1,5 @@
 using DatabaseDiagram.Api.Dtos;
+using DatabaseDiagram.Api.Modelos;
 using DatabaseDiagram.Api.Provedores;
 using DatabaseDiagram.Api.Servicos;
 using Microsoft.AspNetCore.Mvc;
@@ -10,7 +11,10 @@ namespace DatabaseDiagram.Api.Controladores;
 /// Assistente de IA para consultas SQL: <c>POST /api/assistente/consultas</c>.
 /// Limitada por janela de tempo por cliente e por tamanho do corpo. A chave de
 /// API é efêmera (memória, por requisição) e nunca é retornada nem logada — o
-/// <c>logger</c> registra somente o provedor usado (D9/G3/G6).
+/// <c>logger</c> registra somente o provedor usado (D9/G3/G6). Com
+/// <c>conversaId</c> (US1), o histórico da janela de contexto é enviado ao
+/// provedor e a troca é persistida somente em sucesso (D5); sem
+/// <c>conversaId</c>, o fluxo legado de troca única permanece sem persistência.
 /// </summary>
 [ApiController]
 [Route("api/assistente")]
@@ -19,8 +23,10 @@ namespace DatabaseDiagram.Api.Controladores;
 public sealed class AssistenteControlador(
     ServicoDoAssistente servicoDoAssistente,
     FabricaDeProvedoresDeIa fabricaDeProvedores,
+    ServicoDeConversas servicoDeConversas,
     ILogger<AssistenteControlador> logger) : ControllerBase
 {
+    private const string CabecalhoDeContextoTruncado = "X-Contexto-Truncado";
     /// <summary>Corpo máximo do pedido (inclui o schema de contexto): 1 MB.</summary>
     internal const int TamanhoMaximoDoCorpoEmBytes = 1_048_576;
 
@@ -51,13 +57,55 @@ public sealed class AssistenteControlador(
             return BadRequest(new { mensagem = erroDeEntrada });
         }
 
+        Conversa? conversa = null;
+        var contextoTruncado = false;
+        IReadOnlyList<MensagemDaConversa>? historico = null;
+
+        if (requisicao!.ConversaId is { } conversaId)
+        {
+            conversa = await servicoDeConversas.ObterConversaInternaAsync(conversaId.ToString());
+            if (conversa is null)
+            {
+                return NotFound(new { mensagem = MensagensDeValidacao.ConversaNaoEncontrada });
+            }
+
+            if (conversa.ContextoDeBanco is not null &&
+                !IdentidadeCorresponde(conversa.ContextoDeBanco, requisicao.ContextoDeBanco!))
+            {
+                return Conflict(new { mensagem = MensagensDeValidacao.BancoDivergenteDaConversa });
+            }
+
+            var janela = servicoDeConversas.ObterJanelaDeContexto(conversa, requisicao.Mensagem!.Trim());
+            contextoTruncado = janela.Truncada;
+            historico = janela.Mensagens.Take(janela.Mensagens.Count - 1).ToList();
+        }
+
         try
         {
             var resposta = await servicoDoAssistente.ObterRespostaAsync(
-                requisicao!,
+                requisicao,
+                historico,
                 cancellationToken);
 
-            return Ok(RespostaDeConsultaDoAssistente.Criar(resposta));
+            if (conversa is not null)
+            {
+                var identidade = new IdentidadeDeBanco
+                {
+                    Provedor = requisicao.ContextoDeBanco!.Provedor,
+                    NomeDoBanco = requisicao.ContextoDeBanco.NomeDoBanco,
+                    Versao = requisicao.ContextoDeBanco.Versao
+                };
+
+                await servicoDeConversas.PersistirTrocaAsync(
+                    conversa.Id,
+                    identidade,
+                    requisicao.Mensagem!.Trim(),
+                    resposta);
+            }
+
+            Response.Headers[CabecalhoDeContextoTruncado] = contextoTruncado ? "true" : "false";
+
+            return Ok(Dtos.RespostaDeConsultaDoAssistente.Criar(resposta));
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -145,4 +193,16 @@ public sealed class AssistenteControlador(
 
         return null;
     }
+
+    /// <summary>
+    /// Compara a identidade registrada na conversa com o contexto de banco da
+    /// requisição atual (provedor + nome do banco, ignorando maiúsculas —
+    /// FR-013/D7). A versão não participa da comparação: pequenas variações de
+    /// versão não devem bloquear a continuação.
+    /// </summary>
+    private static bool IdentidadeCorresponde(
+        IdentidadeDeBanco identidadeRegistrada,
+        EsquemaDeBanco contextoAtual) =>
+        string.Equals(identidadeRegistrada.Provedor, contextoAtual.Provedor, StringComparison.OrdinalIgnoreCase) &&
+        string.Equals(identidadeRegistrada.NomeDoBanco, contextoAtual.NomeDoBanco, StringComparison.OrdinalIgnoreCase);
 }

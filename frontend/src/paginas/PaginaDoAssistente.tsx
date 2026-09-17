@@ -1,12 +1,23 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { CartaoDeRespostaDeConsulta } from '../componentes/CartaoDeRespostaDeConsulta';
 import { ConfiguracaoDoAssistente } from '../componentes/ConfiguracaoDoAssistente';
+import { ListaDeConversas } from '../componentes/ListaDeConversas';
 import type { EsquemaDeBanco } from '../modelos/tipos';
 import type {
+  Conversa,
+  IdentidadeDeBanco,
   ProvedorDeIaDisponivel,
   RespostaDeConsultaDoAssistente
 } from '../modelos/tiposDoAssistente';
-import { gerarConsulta, listarProvedores } from '../servicos/ApiAssistente';
+import {
+  criarConversa,
+  excluirConversa,
+  gerarConsulta,
+  listarConversas,
+  listarProvedores,
+  obterConversa,
+  renomearConversa
+} from '../servicos/ApiAssistente';
 
 type EstadoDoChat = 'pronto' | 'gerando' | 'sucesso' | 'erro';
 
@@ -23,15 +34,16 @@ interface Propriedades {
 }
 
 /**
- * Chat do assistente (FR-006/FR-011/FR-013/FR-017). Mantém o histórico completo
- * da sessão em estado React (pedidos + respostas estruturadas), na ordem, com
- * rolagem automática até a troca mais recente e releitura de respostas antigas
- * (cada cartão é copiável). "Nova conversa" descarta o histórico e reseta o
- * chat ao estado inicial. A geração pode ser cancelada enquanto responde
- * (FR-013); sem banco conectado o envio é bloqueado com aviso de contexto
- * ausente (FR-006); consultas que não sejam SELECT exibem aviso de somente
- * leitura (FR-017). A chave de API é usada somente em memória, por requisição,
- * e nunca aparece em tela após configurada.
+ * Chat do assistente (FR-004/FR-006/FR-011/FR-013/FR-017). Mantém o histórico
+ * completo da sessão em estado React (pedidos + respostas estruturadas), na
+ * ordem, com rolagem automática até a troca mais recente e releitura de
+ * respostas antigas (cada cartão é copiável). A lista de conversas persistidas
+ * permite abrir, renomear e excluir conversas, e trocar entre elas sem perder
+ * o estado da atual (US2/US3/US4). Um follow-up sobre a mesma conversa
+ * (`conversaId`) envia o histórico como contexto ao provedor; quando o header
+ * `X-Contexto-Truncado` vem `true`, um aviso sutil informa que somente as
+ * mensagens mais recentes foram usadas (US5). A chave de API é usada somente
+ * em memória, por requisição, e nunca aparece em tela após configurada.
  */
 export function PaginaDoAssistente({ contextoDeBanco, aoVoltar }: Propriedades) {
   const [provedores, setProvedores] = useState<ProvedorDeIaDisponivel[]>([]);
@@ -41,6 +53,10 @@ export function PaginaDoAssistente({ contextoDeBanco, aoVoltar }: Propriedades) 
   const [estado, setEstado] = useState<EstadoDoChat>('pronto');
   const [mensagens, setMensagens] = useState<MensagemDoChat[]>([]);
   const [mensagemDeErro, setMensagemDeErro] = useState('');
+  const [conversas, setConversas] = useState<Conversa[]>([]);
+  const [conversaId, setConversaId] = useState<string | null>(null);
+  const [contextoDaConversa, setContextoDaConversa] = useState<IdentidadeDeBanco | null>(null);
+  const [contextoTruncado, setContextoTruncado] = useState(false);
   const historicoRef = useRef<HTMLDivElement>(null);
   const controladorRef = useRef<AbortController | null>(null);
   const proximoIdRef = useRef(1);
@@ -58,6 +74,10 @@ export function PaginaDoAssistente({ contextoDeBanco, aoVoltar }: Propriedades) 
       .catch(() => {
         setProvedores([]);
       });
+
+    listarConversas()
+      .then(setConversas)
+      .catch(() => setConversas([]));
   }, []);
 
   useEffect(() => () => controladorRef.current?.abort(), []);
@@ -74,7 +94,13 @@ export function PaginaDoAssistente({ contextoDeBanco, aoVoltar }: Propriedades) 
     return id;
   }
 
-  function iniciarNovaConversa(): void {
+  function atualizarListaDeConversas(): void {
+    listarConversas()
+      .then(setConversas)
+      .catch(() => undefined);
+  }
+
+  function resetarChatLocal(): void {
     controladorRef.current?.abort();
     controladorRef.current = null;
     proximoIdRef.current = 1;
@@ -82,6 +108,66 @@ export function PaginaDoAssistente({ contextoDeBanco, aoVoltar }: Propriedades) 
     setEstado('pronto');
     setMensagemDeErro('');
     setMensagem('');
+    setContextoTruncado(false);
+  }
+
+  function iniciarNovaConversa(): void {
+    resetarChatLocal();
+    setConversaId(null);
+    setContextoDaConversa(null);
+
+    criarConversa()
+      .then((conversa) => {
+        setConversaId(conversa.id);
+        atualizarListaDeConversas();
+      })
+      .catch(() => undefined);
+  }
+
+  async function selecionarConversa(id: string): Promise<void> {
+    resetarChatLocal();
+    setConversaId(id);
+
+    try {
+      const detalhada = await obterConversa(id);
+      setContextoDaConversa(detalhada.contextoDeBanco ?? null);
+      setMensagens(
+        detalhada.mensagens.map((mensagemDaConversa) => ({
+          id: proximoId(),
+          remetente: mensagemDaConversa.papel,
+          texto:
+            typeof mensagemDaConversa.conteudo === 'string'
+              ? mensagemDaConversa.conteudo
+              : undefined,
+          resposta:
+            typeof mensagemDaConversa.conteudo === 'string'
+              ? undefined
+              : mensagemDaConversa.conteudo
+        }))
+      );
+    } catch {
+      setMensagemDeErro('Não foi possível abrir a conversa.');
+      setEstado('erro');
+    }
+  }
+
+  function renomearConversaAtiva(id: string, titulo: string): void {
+    renomearConversa(id, titulo)
+      .then(atualizarListaDeConversas)
+      .catch(() => undefined);
+  }
+
+  function excluirConversaAtiva(id: string): void {
+    excluirConversa(id)
+      .then(() => {
+        if (id === conversaId) {
+          resetarChatLocal();
+          setConversaId(null);
+          setContextoDaConversa(null);
+        }
+        atualizarListaDeConversas();
+      })
+      .catch(() => undefined);
   }
 
   function cancelarGeracao(): void {
@@ -99,6 +185,12 @@ export function PaginaDoAssistente({ contextoDeBanco, aoVoltar }: Propriedades) 
   const provedorAtivo = provedores.find(
     (provedor) => provedor.provedor === provedorDeIa
   );
+
+  const bancoDivergente =
+    contextoDaConversa != null &&
+    contextoDeBanco != null &&
+    (contextoDaConversa.provedor.toLowerCase() !== contextoDeBanco.provedor.toLowerCase() ||
+      contextoDaConversa.nomeDoBanco.toLowerCase() !== contextoDeBanco.nomeDoBanco.toLowerCase());
 
   async function enviar(evento?: FormEvent): Promise<void> {
     evento?.preventDefault();
@@ -126,12 +218,25 @@ export function PaginaDoAssistente({ contextoDeBanco, aoVoltar }: Propriedades) 
     setMensagem('');
 
     try {
-      const resposta = await gerarConsulta(
+      // Sem uma conversa ativa, cria uma automaticamente para que o
+      // histórico da sessão seja persistido e enviado como contexto nas
+      // trocas seguintes (evita perda de contexto quando o usuário não
+      // clica em "Nova conversa" antes de digitar).
+      let conversaIdAtiva = conversaId;
+      if (conversaIdAtiva == null) {
+        const conversa = await criarConversa();
+        conversaIdAtiva = conversa.id;
+        setConversaId(conversa.id);
+        atualizarListaDeConversas();
+      }
+
+      const { resposta, contextoTruncado: truncado } = await gerarConsulta(
         {
           provedorDeIa,
           chaveDeApi,
           mensagem: texto,
-          contextoDeBanco
+          contextoDeBanco,
+          conversaId: conversaIdAtiva
         },
         controlador.signal
       );
@@ -144,7 +249,15 @@ export function PaginaDoAssistente({ contextoDeBanco, aoVoltar }: Propriedades) 
         ...anteriores,
         { id: proximoId(), remetente: 'assistente', resposta }
       ]);
+      setContextoTruncado(truncado);
       setEstado('sucesso');
+
+      setContextoDaConversa({
+        provedor: contextoDeBanco.provedor,
+        nomeDoBanco: contextoDeBanco.nomeDoBanco,
+        versao: contextoDeBanco.versao ?? undefined
+      });
+      atualizarListaDeConversas();
     } catch (falha) {
       if (controlador.signal.aborted) {
         return;
@@ -181,94 +294,115 @@ export function PaginaDoAssistente({ contextoDeBanco, aoVoltar }: Propriedades) 
             ? 'Nenhum banco conectado'
             : `${contextoDeBanco.nomeDoBanco} · ${contextoDeBanco.provedor}${contextoDeBanco.versao ? ` · ${contextoDeBanco.versao}` : ''}`}
         </span>
-        <button
-          type="button"
-          className="botao-secundario"
-          onClick={iniciarNovaConversa}
-          disabled={estado === 'gerando' || mensagens.length === 0}
-        >
-          Nova conversa
-        </button>
       </header>
 
-      <ConfiguracaoDoAssistente
-        provedores={provedores}
-        provedorDeIa={provedorDeIa}
-        chaveDeApi={chaveDeApi}
-        aoAlterarProvedor={setProvedorDeIa}
-        aoAlterarChave={setChaveDeApi}
-      />
+      <div className="corpo-do-assistente">
+        <ListaDeConversas
+          conversas={conversas}
+          conversaAtivaId={conversaId}
+          aoSelecionar={(id) => {
+            void selecionarConversa(id);
+          }}
+          aoCriarNova={iniciarNovaConversa}
+          aoRenomear={renomearConversaAtiva}
+          aoExcluir={excluirConversaAtiva}
+        />
 
-      {contextoDeBanco == null && (
-        <div className="alerta-de-aviso" role="alert">
-          <strong>Nenhum banco conectado.</strong>
-          <span>
-            {' '}
-            Conecte um banco e carregue o schema para gerar consultas.
-          </span>
-          <button
-            type="button"
-            className="botao-secundario"
-            onClick={aoVoltar}
-          >
-            Conectar ao banco
-          </button>
-        </div>
-      )}
+        <div className="conteudo-do-chat">
+          <ConfiguracaoDoAssistente
+            provedores={provedores}
+            provedorDeIa={provedorDeIa}
+            chaveDeApi={chaveDeApi}
+            aoAlterarProvedor={setProvedorDeIa}
+            aoAlterarChave={setChaveDeApi}
+          />
 
-      <div className="historico-do-chat" aria-live="polite" ref={historicoRef}>
-        {mensagens.map((mensagemDoChat) => (
-          <div key={mensagemDoChat.id} className={`mensagem mensagem-${mensagemDoChat.remetente}`}>
-            {mensagemDoChat.remetente === 'usuario' && <p>{mensagemDoChat.texto}</p>}
-            {mensagemDoChat.remetente === 'assistente' && mensagemDoChat.resposta && (
-              <>
-                <CartaoDeRespostaDeConsulta resposta={mensagemDoChat.resposta} />
-                {mensagemDoChat.resposta.tipo_consulta !== 'SELECT' && (
-                  <div className="alerta-de-aviso" role="alert">
-                    Somente consultas de leitura (SELECT) são geradas pelo
-                    assistente. Revise o pedido e tente novamente.
-                  </div>
+          {contextoDeBanco == null && (
+            <div className="alerta-de-aviso" role="alert">
+              <strong>Nenhum banco conectado.</strong>
+              <span>
+                {' '}
+                Conecte um banco e carregue o schema para gerar consultas.
+              </span>
+              <button
+                type="button"
+                className="botao-secundario"
+                onClick={aoVoltar}
+              >
+                Conectar ao banco
+              </button>
+            </div>
+          )}
+
+          {bancoDivergente && (
+            <div className="alerta-de-aviso-sutil" role="status">
+              O banco conectado atualmente difere do registrado nesta
+              conversa. O histórico continua disponível para consulta.
+            </div>
+          )}
+
+          <div className="historico-do-chat" aria-live="polite" ref={historicoRef}>
+            {mensagens.map((mensagemDoChat) => (
+              <div key={mensagemDoChat.id} className={`mensagem mensagem-${mensagemDoChat.remetente}`}>
+                {mensagemDoChat.remetente === 'usuario' && <p>{mensagemDoChat.texto}</p>}
+                {mensagemDoChat.remetente === 'assistente' && mensagemDoChat.resposta && (
+                  <>
+                    <CartaoDeRespostaDeConsulta resposta={mensagemDoChat.resposta} />
+                    {mensagemDoChat.resposta.tipo_consulta !== 'SELECT' && (
+                      <div className="alerta-de-aviso" role="alert">
+                        Somente consultas de leitura (SELECT) são geradas pelo
+                        assistente. Revise o pedido e tente novamente.
+                      </div>
+                    )}
+                  </>
                 )}
-              </>
+              </div>
+            ))}
+
+            {estado === 'gerando' && (
+              <div className="linha-de-progresso">
+                <p className="estado-progresso" role="status">
+                  Gerando resposta...
+                </p>
+                <button
+                  type="button"
+                  className="botao-secundario"
+                  aria-label="Cancelar geração"
+                  onClick={cancelarGeracao}
+                >
+                  Cancelar
+                </button>
+              </div>
+            )}
+
+            {estado === 'erro' && (
+              <div className="alerta-de-erro" role="alert">
+                {mensagemDeErro}
+              </div>
+            )}
+
+            {estado === 'sucesso' && contextoTruncado && (
+              <p className="aviso-de-contexto-truncado" role="status">
+                Somente as mensagens mais recentes desta conversa foram usadas
+                como contexto.
+              </p>
             )}
           </div>
-        ))}
 
-        {estado === 'gerando' && (
-          <div className="linha-de-progresso">
-            <p className="estado-progresso" role="status">
-              Gerando resposta...
-            </p>
-            <button
-              type="button"
-              className="botao-secundario"
-              aria-label="Cancelar geração"
-              onClick={cancelarGeracao}
-            >
-              Cancelar
+          <form className="entrada-do-chat" onSubmit={enviar}>
+            <textarea
+              placeholder="Descreva a consulta desejada..."
+              aria-label="Mensagem"
+              value={mensagem}
+              onChange={(evento) => setMensagem(evento.target.value)}
+              rows={3}
+            />
+            <button type="submit" className="botao-primario" disabled={!podeEnviar}>
+              Enviar
             </button>
-          </div>
-        )}
-
-        {estado === 'erro' && (
-          <div className="alerta-de-erro" role="alert">
-            {mensagemDeErro}
-          </div>
-        )}
+          </form>
+        </div>
       </div>
-
-      <form className="entrada-do-chat" onSubmit={enviar}>
-        <textarea
-          placeholder="Descreva a consulta desejada..."
-          aria-label="Mensagem"
-          value={mensagem}
-          onChange={(evento) => setMensagem(evento.target.value)}
-          rows={3}
-        />
-        <button type="submit" className="botao-primario" disabled={!podeEnviar}>
-          Enviar
-        </button>
-      </form>
     </div>
   );
 }

@@ -96,6 +96,18 @@ builder.Services.AddSingleton<FabricaDeProvedoresDeIa>();
 builder.Services.AddSingleton<ConstrutorDeContextoDeBanco>();
 builder.Services.AddSingleton<ServicoDoAssistente>();
 
+// Persistência de conversas: diretório configurável (lazy, primeira escrita).
+var diretorioDeConversas = builder.Configuration
+    .GetValue<string>("Armazenamento:DiretorioDeConversas")
+    ?? "dados/conversas";
+var quantidadeMaximaDeMensagens = builder.Configuration
+    .GetValue<int>("Assistente:QuantidadeMaximaDeMensagensDeContexto");
+if (quantidadeMaximaDeMensagens <= 0)
+{
+    quantidadeMaximaDeMensagens = 20;
+}
+builder.Services.AddSingleton(new ServicoDeConversas(diretorioDeConversas, quantidadeMaximaDeMensagens));
+
 var app = builder.Build();
 
 if (app.Environment.IsDevelopment())

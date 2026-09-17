@@ -25,6 +25,14 @@ internal static class MensagensDeValidacao
     public const string ProvedorDeIaNaoSuportado =
         "Provedor de IA não suportado.";
 
+    /// <summary>404 — conversaId informado não corresponde a nenhuma conversa persistida.</summary>
+    public const string ConversaNaoEncontrada =
+        "Conversa não encontrada.";
+
+    /// <summary>409 — o banco conectado na requisição difere do registrado na conversa (FR-013).</summary>
+    public const string BancoDivergenteDaConversa =
+        "O banco conectado difere do registrado nesta conversa.";
+
     public static string PrimeiraMensagem(ModelStateDictionary modelState) =>
         modelState.Values
             .SelectMany(estado => estado.Errors)

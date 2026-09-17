@@ -170,6 +170,43 @@ public class ServicoDoAssistenteTestes
     }
 
     [Fact]
+    public async Task ObterRespostaAsync_ComHistorico_RepassaMensagensDaConversaAoProvedorNaOrdem()
+    {
+        var servico = CriarServico(JsonValido, out var provedor);
+        var historico = new List<MensagemDaConversa>
+        {
+            new() { Papel = "usuario", Conteudo = "primeira pergunta", CriadaEm = "2026-01-01T00:00:00Z" },
+            new() { Papel = "assistente", Conteudo = "resposta anterior", CriadaEm = "2026-01-01T00:00:01Z" }
+        };
+
+        await servico.ObterRespostaAsync(CriarRequisicao(), historico, CancellationToken.None);
+
+        Assert.NotNull(provedor.UltimoPedido);
+        Assert.NotNull(provedor.UltimoPedido!.MensagensDaConversa);
+        Assert.Equal(2, provedor.UltimoPedido.MensagensDaConversa!.Count);
+        Assert.Equal("usuario", provedor.UltimoPedido.MensagensDaConversa[0].Papel);
+        Assert.Equal("assistente", provedor.UltimoPedido.MensagensDaConversa[1].Papel);
+    }
+
+    [Fact]
+    public async Task ObterRespostaAsync_ComConversaCurta_EnviaTodasAsMensagensSemTruncamento()
+    {
+        var servico = CriarServico(JsonValido, out var provedor);
+        var historico = Enumerable.Range(0, 4)
+            .Select(indice => new MensagemDaConversa
+            {
+                Papel = indice % 2 == 0 ? "usuario" : "assistente",
+                Conteudo = $"mensagem {indice}",
+                CriadaEm = "2026-01-01T00:00:00Z"
+            })
+            .ToList();
+
+        await servico.ObterRespostaAsync(CriarRequisicao(), historico, CancellationToken.None);
+
+        Assert.Equal(4, provedor.UltimoPedido!.MensagensDaConversa!.Count);
+    }
+
+    [Fact]
     public async Task ObterRespostaAsync_ComCancelamento_RepassaOCancelamentoSemConverterEm502()
     {
         var servico = CriarServico(JsonValido, out _);
@@ -185,6 +222,7 @@ public class ServicoDoAssistenteTestes
         public string Tipo => "openai";
         public string Rotulo => "OpenAI";
         public int Chamadas { get; private set; }
+        public PedidoDeResposta? UltimoPedido { get; private set; }
 
         public Task<string> ObterRespostaAsync(
             PedidoDeResposta pedido,
@@ -192,6 +230,7 @@ public class ServicoDoAssistenteTestes
             CancellationToken cancellationToken)
         {
             Chamadas++;
+            UltimoPedido = pedido;
             cancellationToken.ThrowIfCancellationRequested();
             return Task.FromResult(conteudo);
         }

@@ -42,14 +42,27 @@ public sealed class OpenAiProvedorDeIa : InterfaceProvedorDeIa
     {
         using var requisicao = new HttpRequestMessage(HttpMethod.Post, EnderecoDaApi);
         requisicao.Headers.Authorization = new AuthenticationHeaderValue("Bearer", chaveDeApi);
+
+        var mensagens = new List<object>
+        {
+            new { role = "system", content = pedido.MensagemDeSistema }
+        };
+
+        foreach (var mensagemDaConversa in pedido.MensagensDaConversa ?? [])
+        {
+            mensagens.Add(new
+            {
+                role = mensagemDaConversa.Papel == "assistente" ? "assistant" : "user",
+                content = ConteudoComoTexto(mensagemDaConversa.Conteudo)
+            });
+        }
+
+        mensagens.Add(new { role = "user", content = pedido.MensagemDoUsuario });
+
         requisicao.Content = JsonContent.Create(new
         {
             model = _modelo,
-            messages = new[]
-            {
-                new { role = "system", content = pedido.MensagemDeSistema },
-                new { role = "user", content = pedido.MensagemDoUsuario }
-            }
+            messages = mensagens
         });
 
         using var resposta = await _httpClient.SendAsync(requisicao, cancellationToken);
@@ -69,4 +82,16 @@ public sealed class OpenAiProvedorDeIa : InterfaceProvedorDeIa
 
         return conteudo.GetString() ?? throw new FalhaNoProvedorDeIaException();
     }
+
+    /// <summary>
+    /// Traduz o conteúdo de uma mensagem do histórico (string para
+    /// <c>"usuario"</c>, contrato estruturado para <c>"assistente"</c>) para
+    /// texto simples enviado ao provedor.
+    /// </summary>
+    private static string ConteudoComoTexto(object conteudo) =>
+        conteudo switch
+        {
+            string texto => texto,
+            _ => JsonSerializer.Serialize(conteudo)
+        };
 }

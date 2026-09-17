@@ -106,33 +106,67 @@ export function PaginaDoDiagrama({ esquema, aoDesconectar }: Propriedades) {
       return !focoInfo || focoInfo.idsDeEdges.has(idDeRelacionamento(relacionamento));
     });
 
-    const edges: Edge[] = relacoes.map((relacionamento) => ({
-      id: idDeRelacionamento(relacionamento),
-      source: idDeTabelaPorChaves(
-        relacionamento.esquemaOrigem,
-        relacionamento.tabelaOrigem
-      ),
-      target: idDeTabelaPorChaves(
-        relacionamento.esquemaDestino,
-        relacionamento.tabelaDestino
-      ),
-      label: relacionamento.nomeDaRestricao ?? undefined,
-      type: 'smoothstep',
-      style: { stroke: '#4f7ef7' }
-    }));
+    const idsDeArestasConectadas = tabelaSelecionada
+      ? new Set(
+          relacoes
+            .filter(
+              (relacionamento) =>
+                idDeTabelaPorChaves(
+                  relacionamento.esquemaOrigem,
+                  relacionamento.tabelaOrigem
+                ) === tabelaSelecionada ||
+                idDeTabelaPorChaves(
+                  relacionamento.esquemaDestino,
+                  relacionamento.tabelaDestino
+                ) === tabelaSelecionada
+            )
+            .map(idDeRelacionamento)
+        )
+      : null;
+
+    const edges: Edge[] = relacoes.map((relacionamento) => {
+      const id = idDeRelacionamento(relacionamento);
+      const className = idsDeArestasConectadas
+        ? idsDeArestasConectadas.has(id)
+          ? 'aresta--destacada'
+          : 'aresta--atenuada'
+        : undefined;
+
+      return {
+        id,
+        source: idDeTabelaPorChaves(
+          relacionamento.esquemaOrigem,
+          relacionamento.tabelaOrigem
+        ),
+        target: idDeTabelaPorChaves(
+          relacionamento.esquemaDestino,
+          relacionamento.tabelaDestino
+        ),
+        label: relacionamento.nomeDaRestricao ?? undefined,
+        type: 'smoothstep',
+        className
+      };
+    });
 
     const nodes: Node[] = tabelasVisiveis.map((tabela) => {
       const chave = idDeTabela(tabela);
+      const className = tabelaSelecionada
+        ? chave === tabelaSelecionada
+          ? 'tabela--selecionada'
+          : 'tabela--atenuada'
+        : undefined;
+
       return {
         id: chave,
         position: posicoes[chave] ?? { x: 0, y: 0 },
         data: { tabela },
-        type: 'tabela'
+        type: 'tabela',
+        className
       } as NodoDeTabela;
     });
 
     return { nodes, edges };
-  }, [tabelasVisiveis, esquema, focoInfo, posicoes]);
+  }, [tabelasVisiveis, esquema, focoInfo, posicoes, tabelaSelecionada]);
 
   function organizarAutomaticamente(): void {
     const naoOcultas = esquema.tabelas.filter(
@@ -171,6 +205,11 @@ export function PaginaDoDiagrama({ esquema, aoDesconectar }: Propriedades) {
     setTabelaSelecionada(nodo.id);
     setFoco(null);
   };
+
+  function aoClicarAreaVazia(): void {
+    setTabelaSelecionada(null);
+    setFoco(null);
+  }
 
   const aoArrastarNodo: NodeDragHandler = (_evento, nodo) => {
     setPosicoes((anteriores) => ({ ...anteriores, [nodo.id]: nodo.position }));
@@ -265,12 +304,13 @@ export function PaginaDoDiagrama({ esquema, aoDesconectar }: Propriedades) {
             nodeTypes={tiposDeNodos}
             onNodeClick={aoClicarNodo}
             onNodeDragStop={aoArrastarNodo}
+            onPaneClick={aoClicarAreaVazia}
             fitView
             fitViewOptions={{ padding: 0.2 }}
             nodesDraggable
             proOptions={{ hideAttribution: true }}
           >
-            <Background gap={18} color="#e2e6ee" />
+            <Background gap={18} color="#262c3b" />
             <Controls showInteractive={false} />
           </ReactFlow>
         )}

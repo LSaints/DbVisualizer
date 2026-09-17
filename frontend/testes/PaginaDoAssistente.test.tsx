@@ -3,15 +3,30 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EsquemaDeBanco } from '../src/modelos/tipos';
 import type {
+  Conversa,
+  ConversaDetalhada,
   ProvedorDeIaDisponivel,
   RespostaDeConsultaDoAssistente
 } from '../src/modelos/tiposDoAssistente';
 import { PaginaDoAssistente } from '../src/paginas/PaginaDoAssistente';
-import { gerarConsulta, listarProvedores } from '../src/servicos/ApiAssistente';
+import {
+  criarConversa,
+  excluirConversa,
+  gerarConsulta,
+  listarConversas,
+  listarProvedores,
+  obterConversa,
+  renomearConversa
+} from '../src/servicos/ApiAssistente';
 
 vi.mock('../src/servicos/ApiAssistente', () => ({
   gerarConsulta: vi.fn(),
-  listarProvedores: vi.fn()
+  listarProvedores: vi.fn(),
+  listarConversas: vi.fn(),
+  criarConversa: vi.fn(),
+  obterConversa: vi.fn(),
+  renomearConversa: vi.fn(),
+  excluirConversa: vi.fn()
 }));
 
 const contextoDeBanco: EsquemaDeBanco = {
@@ -75,6 +90,15 @@ describe('PaginaDoAssistente', () => {
       { provedor: 'openai', rotulo: 'OpenAI' },
       { provedor: 'google-ai-studio', rotulo: 'Google AI Studio' }
     ] satisfies ProvedorDeIaDisponivel[]);
+    vi.mocked(listarConversas).mockResolvedValue([]);
+    vi.mocked(gerarConsulta).mockResolvedValue({ resposta, contextoTruncado: false });
+    vi.mocked(criarConversa).mockResolvedValue({
+      id: 'conversa-auto',
+      titulo: 'Nova conversa',
+      criadaEm: '2026-01-01T00:00:00Z',
+      atualizadaEm: '2026-01-01T00:00:00Z',
+      resumo: 'Conversa vazia'
+    } satisfies Conversa);
 
     Object.defineProperty(navigator, 'clipboard', {
       value: { writeText: vi.fn().mockResolvedValue(undefined) },
@@ -83,9 +107,10 @@ describe('PaginaDoAssistente', () => {
   });
 
   it('enviar um pedido muda o estado para "gerando resposta" e termina em sucesso com o cartão', async () => {
-    let liberarResposta: (valor: RespostaDeConsultaDoAssistente) => void = () => undefined;
+    let liberarResposta: (valor: { resposta: RespostaDeConsultaDoAssistente; contextoTruncado: boolean }) => void =
+      () => undefined;
     vi.mocked(gerarConsulta).mockReturnValue(
-      new Promise<RespostaDeConsultaDoAssistente>((resolver) => {
+      new Promise((resolver) => {
         liberarResposta = resolver;
       })
     );
@@ -107,7 +132,7 @@ describe('PaginaDoAssistente', () => {
     expect(screen.getByText('Gerando resposta...')).toBeInTheDocument();
 
     await act(async () => {
-      liberarResposta(resposta);
+      liberarResposta({ resposta, contextoTruncado: false });
     });
 
     expect(
@@ -118,7 +143,6 @@ describe('PaginaDoAssistente', () => {
 
   it('seleciona o provedor e informa a chave em campo de senha; a chave não aparece em tela nem em log (SC-002)', async () => {
     const logar = vi.spyOn(console, 'log').mockImplementation(() => undefined);
-    vi.mocked(gerarConsulta).mockResolvedValue(resposta);
 
     render(<PaginaDoAssistente contextoDeBanco={contextoDeBanco} aoVoltar={() => undefined} />);
 
@@ -152,7 +176,9 @@ describe('PaginaDoAssistente', () => {
   });
 
   it('mantém todas as mensagens visíveis na ordem e cada resposta antiga completa e copiável (FR-011/FR-012)', async () => {
-    vi.mocked(gerarConsulta).mockResolvedValueOnce(resposta).mockResolvedValueOnce(segundaResposta);
+    vi.mocked(gerarConsulta)
+      .mockResolvedValueOnce({ resposta, contextoTruncado: false })
+      .mockResolvedValueOnce({ resposta: segundaResposta, contextoTruncado: false });
 
     render(<PaginaDoAssistente contextoDeBanco={contextoDeBanco} aoVoltar={() => undefined} />);
 
@@ -181,8 +207,14 @@ describe('PaginaDoAssistente', () => {
     expect(vi.mocked(gerarConsulta)).toHaveBeenCalledTimes(2);
   });
 
-  it('"Nova conversa" descarta o histórico e volta ao estado inicial (FR-011/FR-012)', async () => {
-    vi.mocked(gerarConsulta).mockResolvedValue(resposta);
+  it('"Nova conversa" cria uma conversa persistida e reseta o chat local (US1/US3)', async () => {
+    vi.mocked(criarConversa).mockResolvedValue({
+      id: 'conversa-nova',
+      titulo: 'Nova conversa',
+      criadaEm: '2026-01-01T00:00:00Z',
+      atualizadaEm: '2026-01-01T00:00:00Z',
+      resumo: 'Conversa vazia'
+    } satisfies Conversa);
 
     render(<PaginaDoAssistente contextoDeBanco={contextoDeBanco} aoVoltar={() => undefined} />);
 
@@ -194,6 +226,108 @@ describe('PaginaDoAssistente', () => {
     expect(screen.queryByText('quero listar os contratos')).not.toBeInTheDocument();
     expect(screen.queryByText('SELECT c.* FROM contratos c;')).not.toBeInTheDocument();
     expect(screen.getByPlaceholderText('Descreva a consulta desejada...')).toHaveValue('');
+    expect(vi.mocked(criarConversa)).toHaveBeenCalled();
+  });
+
+  it('follow-up com conversaId ativo envia o mesmo id e preserva o histórico anterior (US1)', async () => {
+    vi.mocked(listarConversas).mockResolvedValue([
+      {
+        id: 'conversa-1',
+        titulo: 'Contratos',
+        criadaEm: '2026-01-01T00:00:00Z',
+        atualizadaEm: '2026-01-01T00:00:00Z',
+        resumo: 'Conversa vazia'
+      }
+    ] satisfies Conversa[]);
+    vi.mocked(obterConversa).mockResolvedValue({
+      id: 'conversa-1',
+      titulo: 'Contratos',
+      criadaEm: '2026-01-01T00:00:00Z',
+      atualizadaEm: '2026-01-01T00:00:00Z',
+      resumo: 'Conversa vazia',
+      contextoDeBanco: { provedor: 'mysql', nomeDoBanco: 'erp' },
+      mensagens: []
+    } satisfies ConversaDetalhada);
+    vi.mocked(gerarConsulta)
+      .mockResolvedValueOnce({ resposta, contextoTruncado: false })
+      .mockResolvedValueOnce({ resposta: segundaResposta, contextoTruncado: false });
+
+    render(<PaginaDoAssistente contextoDeBanco={contextoDeBanco} aoVoltar={() => undefined} />);
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Contratos' }));
+    await enviarPedido('quero listar os contratos');
+    await enviarPedido('na consulta anterior, inclua o nome do cliente');
+
+    expect(vi.mocked(gerarConsulta)).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ conversaId: 'conversa-1' }),
+      expect.any(AbortSignal)
+    );
+    expect(vi.mocked(gerarConsulta)).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ conversaId: 'conversa-1' }),
+      expect.any(AbortSignal)
+    );
+    expect(screen.getByText('quero listar os contratos')).toBeInTheDocument();
+  });
+
+  it('reabrir uma conversa restaura pedidos e cartões completos com SQL copiável (US2)', async () => {
+    vi.mocked(listarConversas).mockResolvedValue([
+      {
+        id: 'conversa-1',
+        titulo: 'Contratos',
+        criadaEm: '2026-01-01T00:00:00Z',
+        atualizadaEm: '2026-01-01T00:00:00Z',
+        resumo: 'Lista todos os contratos.'
+      }
+    ] satisfies Conversa[]);
+    vi.mocked(obterConversa).mockResolvedValue({
+      id: 'conversa-1',
+      titulo: 'Contratos',
+      criadaEm: '2026-01-01T00:00:00Z',
+      atualizadaEm: '2026-01-01T00:00:00Z',
+      resumo: 'Lista todos os contratos.',
+      contextoDeBanco: { provedor: 'mysql', nomeDoBanco: 'erp' },
+      mensagens: [
+        { papel: 'usuario', conteudo: 'quero listar os contratos', criadaEm: '2026-01-01T00:00:01Z' },
+        { papel: 'assistente', conteudo: resposta, criadaEm: '2026-01-01T00:00:02Z' }
+      ]
+    } satisfies ConversaDetalhada);
+
+    render(<PaginaDoAssistente contextoDeBanco={contextoDeBanco} aoVoltar={() => undefined} />);
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Contratos' }));
+
+    expect(await screen.findByText('quero listar os contratos')).toBeInTheDocument();
+    expect(screen.getByText('SELECT c.* FROM contratos c;')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Copiar consulta' })).toBeInTheDocument();
+  });
+
+  it('banco conectado diferente do registrado na conversa exibe aviso sutil sem bloquear o histórico (US2)', async () => {
+    vi.mocked(listarConversas).mockResolvedValue([
+      {
+        id: 'conversa-1',
+        titulo: 'Outro banco',
+        criadaEm: '2026-01-01T00:00:00Z',
+        atualizadaEm: '2026-01-01T00:00:00Z',
+        resumo: 'Conversa vazia'
+      }
+    ] satisfies Conversa[]);
+    vi.mocked(obterConversa).mockResolvedValue({
+      id: 'conversa-1',
+      titulo: 'Outro banco',
+      criadaEm: '2026-01-01T00:00:00Z',
+      atualizadaEm: '2026-01-01T00:00:00Z',
+      resumo: 'Conversa vazia',
+      contextoDeBanco: { provedor: 'mysql', nomeDoBanco: 'outro-banco' },
+      mensagens: []
+    } satisfies ConversaDetalhada);
+
+    render(<PaginaDoAssistente contextoDeBanco={contextoDeBanco} aoVoltar={() => undefined} />);
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Outro banco' }));
+
+    expect(await screen.findByText(/banco conectado atualmente difere/i)).toBeInTheDocument();
   });
 
   it('chave inválida ou indisponível mostra aviso orientado à ação sem expor a chave (FR-014)', async () => {
@@ -237,7 +371,7 @@ describe('PaginaDoAssistente', () => {
   });
 
   it('cancelar durante "gerando resposta" volta ao estado pronto (FR-013)', async () => {
-    let liberarResposta!: (valor: RespostaDeConsultaDoAssistente) => void;
+    let liberarResposta!: (valor: { resposta: RespostaDeConsultaDoAssistente; contextoTruncado: boolean }) => void;
     let sinalCapturado: AbortSignal | undefined;
     vi.mocked(gerarConsulta).mockImplementation((_requisicao, sinal) => {
       sinalCapturado = sinal;
@@ -270,7 +404,7 @@ describe('PaginaDoAssistente', () => {
     expect(screen.getByRole('button', { name: 'Enviar' })).not.toBeDisabled();
 
     await act(async () => {
-      liberarResposta(resposta);
+      liberarResposta({ resposta, contextoTruncado: false });
     });
   });
 
@@ -281,7 +415,7 @@ describe('PaginaDoAssistente', () => {
       tipo_consulta: 'UPDATE',
       explicacao: 'O sistema gera somente SELECT.'
     };
-    vi.mocked(gerarConsulta).mockResolvedValue(respostaDeEscrita);
+    vi.mocked(gerarConsulta).mockResolvedValue({ resposta: respostaDeEscrita, contextoTruncado: false });
 
     render(<PaginaDoAssistente contextoDeBanco={contextoDeBanco} aoVoltar={() => undefined} />);
 
@@ -296,6 +430,103 @@ describe('PaginaDoAssistente', () => {
       await screen.findByText(/somente consultas de leitura/i)
     ).toBeInTheDocument();
     expect(screen.getByText('UPDATE contratos SET status = "ativo";')).toBeInTheDocument();
+  });
+
+  it('header X-Contexto-Truncado true exibe aviso sutil mantendo o histórico visível (US5)', async () => {
+    vi.mocked(gerarConsulta).mockResolvedValue({ resposta, contextoTruncado: true });
+
+    render(<PaginaDoAssistente contextoDeBanco={contextoDeBanco} aoVoltar={() => undefined} />);
+
+    await enviarPedido('quero listar os contratos');
+
+    expect(
+      await screen.findByText(/somente as mensagens mais recentes/i)
+    ).toBeInTheDocument();
+    expect(screen.getByText('quero listar os contratos')).toBeInTheDocument();
+    expect(screen.getByText('SELECT c.* FROM contratos c;')).toBeInTheDocument();
+  });
+
+  it('exibe a lista de conversas e permite trocar entre elas preservando o estado (FR-004/FR-017/US3)', async () => {
+    vi.mocked(listarConversas).mockResolvedValue([
+      {
+        id: 'conversa-1',
+        titulo: 'Contratos',
+        criadaEm: '2026-01-01T00:00:00Z',
+        atualizadaEm: '2026-01-01T00:00:00Z',
+        resumo: 'Conversa vazia'
+      },
+      {
+        id: 'conversa-2',
+        titulo: 'Clientes',
+        criadaEm: '2026-01-02T00:00:00Z',
+        atualizadaEm: '2026-01-02T00:00:00Z',
+        resumo: 'Conversa vazia'
+      }
+    ] satisfies Conversa[]);
+
+    render(<PaginaDoAssistente contextoDeBanco={contextoDeBanco} aoVoltar={() => undefined} />);
+
+    expect(await screen.findByRole('button', { name: 'Contratos' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Clientes' })).toBeInTheDocument();
+  });
+
+  it('excluir a conversa em andamento volta o chat ao estado inicial (US4)', async () => {
+    vi.mocked(listarConversas).mockResolvedValue([
+      {
+        id: 'conversa-1',
+        titulo: 'Contratos',
+        criadaEm: '2026-01-01T00:00:00Z',
+        atualizadaEm: '2026-01-01T00:00:00Z',
+        resumo: 'Lista todos os contratos.'
+      }
+    ] satisfies Conversa[]);
+    vi.mocked(obterConversa).mockResolvedValue({
+      id: 'conversa-1',
+      titulo: 'Contratos',
+      criadaEm: '2026-01-01T00:00:00Z',
+      atualizadaEm: '2026-01-01T00:00:00Z',
+      resumo: 'Lista todos os contratos.',
+      contextoDeBanco: { provedor: 'mysql', nomeDoBanco: 'erp' },
+      mensagens: [
+        { papel: 'usuario', conteudo: 'quero listar os contratos', criadaEm: '2026-01-01T00:00:01Z' },
+        { papel: 'assistente', conteudo: resposta, criadaEm: '2026-01-01T00:00:02Z' }
+      ]
+    } satisfies ConversaDetalhada);
+    vi.mocked(excluirConversa).mockResolvedValue(undefined);
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+    render(<PaginaDoAssistente contextoDeBanco={contextoDeBanco} aoVoltar={() => undefined} />);
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Contratos' }));
+    expect(await screen.findByText('quero listar os contratos')).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Excluir Contratos' }));
+
+    expect(vi.mocked(excluirConversa)).toHaveBeenCalledWith('conversa-1');
+    expect(screen.queryByText('quero listar os contratos')).not.toBeInTheDocument();
+  });
+
+  it('renomear a conversa ativa reflete o novo título (US4)', async () => {
+    vi.mocked(listarConversas).mockResolvedValue([
+      {
+        id: 'conversa-1',
+        titulo: 'Contratos',
+        criadaEm: '2026-01-01T00:00:00Z',
+        atualizadaEm: '2026-01-01T00:00:00Z',
+        resumo: 'Conversa vazia'
+      }
+    ] satisfies Conversa[]);
+    vi.mocked(renomearConversa).mockResolvedValue(undefined);
+
+    render(<PaginaDoAssistente contextoDeBanco={contextoDeBanco} aoVoltar={() => undefined} />);
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Renomear Contratos' }));
+    const campo = screen.getByLabelText('Renomear conversa Contratos');
+    await userEvent.clear(campo);
+    await userEvent.type(campo, 'Contratos ativos');
+    await userEvent.click(screen.getByRole('button', { name: 'Salvar' }));
+
+    expect(vi.mocked(renomearConversa)).toHaveBeenCalledWith('conversa-1', 'Contratos ativos');
   });
 });
 

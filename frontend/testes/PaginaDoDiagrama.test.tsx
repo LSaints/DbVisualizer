@@ -152,4 +152,28 @@ describe('PaginaDoDiagrama (cenários 4-8 do quickstart)', () => {
     expect(screen.getByText('clientes')).toBeInTheDocument();
     expect(screen.getByText('pagamentos')).toBeInTheDocument();
   });
+
+  it('cenário 9: selecionar uma tabela destaca o node selecionado e atenua as demais; clique em área vazia limpa a seleção', () => {
+    renderizaPagina();
+
+    clicarNumaTabela('pedidos');
+
+    const nodoPedidos = screen.getByText('pedidos').closest('.react-flow__node');
+    const nodoPagamentos = screen.getByText('pagamentos').closest('.react-flow__node');
+
+    expect(nodoPedidos).toHaveClass('tabela--selecionada');
+    expect(nodoPagamentos).toHaveClass('tabela--atenuada');
+
+    const painel = document.querySelector('.react-flow__pane');
+    expect(painel).not.toBeNull();
+    act(() => {
+      painel?.dispatchEvent(
+        new MouseEvent('click', { bubbles: true, cancelable: true })
+      );
+    });
+
+    expect(screen.getByText('pedidos').closest('.react-flow__node')).not.toHaveClass(
+      'tabela--selecionada'
+    );
+  });
 });

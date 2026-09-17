@@ -49,6 +49,17 @@ public sealed class ServicoDoAssistente
     /// </summary>
     public async Task<RespostaDeConsultaDoAssistente> ObterRespostaAsync(
         RequisicaoDeConsultaDoAssistente requisicao,
+        CancellationToken cancellationToken) =>
+        await ObterRespostaAsync(requisicao, historicoDeMensagens: null, cancellationToken);
+
+    /// <summary>
+    /// Sobrecarga usada quando a consulta pertence a uma conversa (US1):
+    /// <paramref name="historicoDeMensagens"/> é a janela de contexto (sem a
+    /// mensagem atual), repassada ao provedor com os papéis nativos (D3/FR-002).
+    /// </summary>
+    public async Task<RespostaDeConsultaDoAssistente> ObterRespostaAsync(
+        RequisicaoDeConsultaDoAssistente requisicao,
+        IReadOnlyList<Modelos.MensagemDaConversa>? historicoDeMensagens,
         CancellationToken cancellationToken)
     {
         // Defesa em profundidade: o controlador valida a entrada (400), mas o
@@ -64,7 +75,8 @@ public sealed class ServicoDoAssistente
         var contexto = _construtor.Construir(requisicao.ContextoDeBanco!);
         var pedido = new PedidoDeResposta(
             contexto,
-            requisicao.Mensagem!.Trim());
+            requisicao.Mensagem!.Trim(),
+            historicoDeMensagens);
 
         string texto;
         try

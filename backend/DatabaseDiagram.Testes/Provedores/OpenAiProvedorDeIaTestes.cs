@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text.Json;
+using DatabaseDiagram.Api.Modelos;
 using DatabaseDiagram.Api.Provedores;
 using DatabaseDiagram.Api.Provedores.Ia.OpenAi;
 
@@ -55,6 +56,44 @@ public class OpenAiProvedorDeIaTestes
         Assert.Equal("Liste os contratos.", mensagens[1].GetProperty("content").GetString());
 
         Assert.Contains("SELECT * FROM contratos;", resposta);
+    }
+
+    [Fact]
+    public async Task ObterRespostaAsync_ComHistorico_EnviaMessagesComPapeisNativosNaOrdemCronologica()
+    {
+        JsonElement corpoCapturado = default;
+        using var httpClient = new HttpClient(new HandlerFalso(async requisicao =>
+        {
+            corpoCapturado = JsonSerializer.Deserialize<JsonElement>(
+                await requisicao.Content!.ReadAsStringAsync());
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(RespostaJson)
+            };
+        }));
+        var provedor = new OpenAiProvedorDeIa(httpClient);
+
+        var historico = new List<MensagemDaConversa>
+        {
+            new() { Papel = "usuario", Conteudo = "primeira pergunta", CriadaEm = "2026-01-01T00:00:00Z" },
+            new() { Papel = "assistente", Conteudo = "resposta anterior", CriadaEm = "2026-01-01T00:00:01Z" }
+        };
+        var pedido = new PedidoDeResposta(
+            MensagemDeSistema: "Você é um assistente de SQL.",
+            MensagemDoUsuario: "na consulta anterior, inclua o nome do cliente",
+            MensagensDaConversa: historico);
+
+        await provedor.ObterRespostaAsync(pedido, "sk-teste-123", CancellationToken.None);
+
+        var mensagens = corpoCapturado.GetProperty("messages");
+        Assert.Equal(4, mensagens.GetArrayLength());
+        Assert.Equal("system", mensagens[0].GetProperty("role").GetString());
+        Assert.Equal("user", mensagens[1].GetProperty("role").GetString());
+        Assert.Contains("primeira pergunta", mensagens[1].GetProperty("content").GetString());
+        Assert.Equal("assistant", mensagens[2].GetProperty("role").GetString());
+        Assert.Contains("resposta anterior", mensagens[2].GetProperty("content").GetString());
+        Assert.Equal("user", mensagens[3].GetProperty("role").GetString());
+        Assert.Equal("na consulta anterior, inclua o nome do cliente", mensagens[3].GetProperty("content").GetString());
     }
 
     [Fact]

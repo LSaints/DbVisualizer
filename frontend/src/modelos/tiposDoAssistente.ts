@@ -58,10 +58,41 @@ export interface RequisicaoDeConsultaDoAssistente {
   chaveDeApi: string;
   mensagem: string;
   contextoDeBanco: EsquemaDeBanco;
+  /** Id da conversa (US1); ausente = fluxo legado de troca única, sem persistência. */
+  conversaId?: string;
 }
 
 /** Item de `GET /api/assistente/provedores`. */
 export interface ProvedorDeIaDisponivel {
   provedor: string;
   rotulo: string;
+}
+
+/** Identidade do banco registrada em uma conversa (FR-013/D7). */
+export interface IdentidadeDeBanco {
+  provedor: string;
+  nomeDoBanco: string;
+  versao?: string;
+}
+
+/** Uma troca persistida na conversa (D3/data-model.md). */
+export interface MensagemDaConversa {
+  papel: 'usuario' | 'assistente';
+  conteudo: string | RespostaDeConsultaDoAssistente;
+  criadaEm: string;
+}
+
+/** Item de `GET /api/conversas` (contracts/api.md). */
+export interface Conversa {
+  id: string;
+  titulo: string;
+  criadaEm: string;
+  atualizadaEm: string;
+  resumo: string;
+}
+
+/** Resposta de `GET /api/conversas/{id}`. */
+export interface ConversaDetalhada extends Conversa {
+  contextoDeBanco?: IdentidadeDeBanco | null;
+  mensagens: MensagemDaConversa[];
 }

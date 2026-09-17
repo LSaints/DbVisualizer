@@ -5,6 +5,7 @@ using DatabaseDiagram.Api.Modelos;
 using DatabaseDiagram.Api.Provedores;
 using DatabaseDiagram.Api.Servicos;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
@@ -32,12 +33,31 @@ public class AssistenteControladorTestes
         }
         """;
 
-    private static AssistenteControlador CriarControlador(out ProvedorDeIaFalso provedor)
+    private static AssistenteControlador CriarControlador(out ProvedorDeIaFalso provedor) =>
+        CriarControlador(out provedor, out _);
+
+    private static AssistenteControlador CriarControlador(
+        out ProvedorDeIaFalso provedor,
+        out ServicoDeConversas servicoDeConversas,
+        string? diretorioDeConversas = null)
     {
         provedor = new ProvedorDeIaFalso(JsonValido);
         var fabrica = new FabricaDeProvedoresDeIa([provedor]);
         var servico = new ServicoDoAssistente(fabrica, new ConstrutorDeContextoDeBanco());
-        return new AssistenteControlador(servico, fabrica, NullLogger<AssistenteControlador>.Instance);
+        servicoDeConversas = new ServicoDeConversas(
+            diretorioDeConversas ?? Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString()));
+        var controlador = new AssistenteControlador(
+            servico,
+            fabrica,
+            servicoDeConversas,
+            NullLogger<AssistenteControlador>.Instance)
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext()
+            }
+        };
+        return controlador;
     }
 
     private static RequisicaoDeConsultaDoAssistente CriarRequisicaoValida() => new()
@@ -152,6 +172,132 @@ public class AssistenteControladorTestes
     }
 
     [Fact]
+    public async Task ObterResposta_SemConversaId_Retorna200ComHeaderDeContextoFalseSemPersistir()
+    {
+        var controlador = CriarControlador(out _, out var servicoDeConversas);
+
+        var resultado = await controlador.ObterResposta(CriarRequisicaoValida(), CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(resultado);
+        Assert.Equal("false", controlador.HttpContext.Response.Headers["X-Contexto-Truncado"]);
+        Assert.Empty(await servicoDeConversas.ListarConversasAsync());
+    }
+
+    [Fact]
+    public async Task ObterResposta_ComConversaIdInexistente_Retorna404EmPtBr()
+    {
+        var controlador = CriarControlador(out _, out _);
+        var requisicao = CriarRequisicaoValida();
+        requisicao.ConversaId = Guid.NewGuid();
+
+        var resultado = await controlador.ObterResposta(requisicao, CancellationToken.None);
+
+        var erro = Assert.IsType<NotFoundObjectResult>(resultado);
+        var corpo = erro.Value as dynamic;
+        Assert.Equal("Conversa não encontrada.", (string)corpo!.mensagem);
+    }
+
+    [Fact]
+    public async Task ObterResposta_ComBancoDivergenteDoRegistradoNaConversa_Retorna409EmPtBr()
+    {
+        var controlador = CriarControlador(out _, out var servicoDeConversas);
+        var conversa = await servicoDeConversas.CriarConversaAsync();
+        await servicoDeConversas.PersistirTrocaAsync(
+            conversa.Id,
+            new IdentidadeDeBanco { Provedor = "mysql", NomeDoBanco = "outro-banco" },
+            "primeira mensagem",
+            new DatabaseDiagram.Api.Modelos.RespostaDeConsultaDoAssistente
+            {
+                Consulta = "SELECT 1;",
+                Explicacao = "teste"
+            });
+
+        var requisicao = CriarRequisicaoValida();
+        requisicao.ConversaId = Guid.Parse(conversa.Id);
+
+        var resultado = await controlador.ObterResposta(requisicao, CancellationToken.None);
+
+        var erro = Assert.IsType<ConflictObjectResult>(resultado);
+        var corpo = erro.Value as dynamic;
+        Assert.Equal("O banco conectado difere do registrado nesta conversa.", (string)corpo!.mensagem);
+    }
+
+    [Fact]
+    public async Task ObterResposta_ComConversaId_PersisteATrocaEAdicionaHeaderDeContexto()
+    {
+        var controlador = CriarControlador(out _, out var servicoDeConversas);
+        var conversa = await servicoDeConversas.CriarConversaAsync();
+
+        var requisicao = CriarRequisicaoValida();
+        requisicao.ConversaId = Guid.Parse(conversa.Id);
+
+        var resultado = await controlador.ObterResposta(requisicao, CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(resultado);
+        Assert.Equal("false", controlador.HttpContext.Response.Headers["X-Contexto-Truncado"]);
+
+        var detalhada = await servicoDeConversas.ObterConversaAsync(conversa.Id);
+        Assert.NotNull(detalhada);
+        Assert.Equal(2, detalhada!.Mensagens.Count);
+        Assert.Equal("usuario", detalhada.Mensagens[0].Papel);
+        Assert.Equal("assistente", detalhada.Mensagens[1].Papel);
+    }
+
+    [Fact]
+    public async Task ObterResposta_ComConversaId_UsaHistoricoPersistidoComoContextoSemDuplicarTrocas()
+    {
+        var controlador = CriarControlador(out var provedor, out var servicoDeConversas);
+        var conversa = await servicoDeConversas.CriarConversaAsync();
+        var requisicao = CriarRequisicaoValida();
+        requisicao.ConversaId = Guid.Parse(conversa.Id);
+
+        await controlador.ObterResposta(requisicao, CancellationToken.None);
+        await controlador.ObterResposta(requisicao, CancellationToken.None);
+
+        var detalhada = await servicoDeConversas.ObterConversaAsync(conversa.Id);
+        Assert.Equal(4, detalhada!.Mensagens.Count);
+        Assert.Equal(2, provedor.Chamadas);
+    }
+
+    [Fact]
+    public async Task ObterResposta_QuandoOProvedorFalha_NaoPersisteNada()
+    {
+        var fabrica = new FabricaDeProvedoresDeIa([new ProvedorDeIaFalsoFalhando()]);
+        var servico = new ServicoDoAssistente(fabrica, new ConstrutorDeContextoDeBanco());
+        var servicoDeConversas = new ServicoDeConversas(
+            Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString()));
+        var controlador = new AssistenteControlador(
+            servico, fabrica, servicoDeConversas, NullLogger<AssistenteControlador>.Instance)
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext()
+            }
+        };
+        var conversa = await servicoDeConversas.CriarConversaAsync();
+        var requisicao = CriarRequisicaoValida();
+        requisicao.ConversaId = Guid.Parse(conversa.Id);
+
+        var resultado = await controlador.ObterResposta(requisicao, CancellationToken.None);
+
+        Assert.IsType<ObjectResult>(resultado);
+        var detalhada = await servicoDeConversas.ObterConversaAsync(conversa.Id);
+        Assert.Empty(detalhada!.Mensagens);
+    }
+
+    private sealed class ProvedorDeIaFalsoFalhando : InterfaceProvedorDeIa
+    {
+        public string Tipo => "openai";
+        public string Rotulo => "OpenAI";
+
+        public Task<string> ObterRespostaAsync(
+            PedidoDeResposta pedido,
+            string chaveDeApi,
+            CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("Falha de rede simulada.");
+    }
+
+    [Fact]
     public void ListarProvedores_Retorna200ComProvedoresDisponiveisNaFabrica()
     {
         var controlador = CriarControlador(out _);
@@ -206,11 +352,15 @@ public class AssistenteControladorTestes
     {
         public string Tipo => "openai";
         public string Rotulo => "OpenAI";
+        public int Chamadas { get; private set; }
 
         public Task<string> ObterRespostaAsync(
             PedidoDeResposta pedido,
             string chaveDeApi,
-            CancellationToken cancellationToken) =>
-            Task.FromResult(conteudo);
+            CancellationToken cancellationToken)
+        {
+            Chamadas++;
+            return Task.FromResult(conteudo);
+        }
     }
 }

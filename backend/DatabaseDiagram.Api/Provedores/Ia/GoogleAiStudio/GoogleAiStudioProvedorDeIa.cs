@@ -47,6 +47,33 @@ public sealed class GoogleAiStudioProvedorDeIa : InterfaceProvedorDeIa
             HttpMethod.Post,
             new Uri(EnderecoBase, $"models/{_modelo}:generateContent"));
         requisicao.Headers.Add(CabecalhoDaChave, chaveDeApi);
+
+        var contents = new List<Dictionary<string, object>>();
+
+        void AdicionarTurno(string role, string texto)
+        {
+            if (contents.Count > 0 && (string)contents[^1]["role"] == role)
+            {
+                ((List<object>)contents[^1]["parts"]).Add(new { text = texto });
+                return;
+            }
+
+            contents.Add(new Dictionary<string, object>
+            {
+                ["role"] = role,
+                ["parts"] = new List<object> { new { text = texto } }
+            });
+        }
+
+        foreach (var mensagemDaConversa in pedido.MensagensDaConversa ?? [])
+        {
+            AdicionarTurno(
+                mensagemDaConversa.Papel == "assistente" ? "model" : "user",
+                ConteudoComoTexto(mensagemDaConversa.Conteudo));
+        }
+
+        AdicionarTurno("user", pedido.MensagemDoUsuario);
+
         requisicao.Content = JsonContent.Create(new
         {
             system_instruction = new
@@ -56,17 +83,7 @@ public sealed class GoogleAiStudioProvedorDeIa : InterfaceProvedorDeIa
                     new { text = pedido.MensagemDeSistema }
                 }
             },
-            contents = new[]
-            {
-                new
-                {
-                    role = "user",
-                    parts = new[]
-                    {
-                        new { text = pedido.MensagemDoUsuario }
-                    }
-                }
-            }
+            contents
         });
 
         using var resposta = await _httpClient.SendAsync(requisicao, cancellationToken);
@@ -88,4 +105,16 @@ public sealed class GoogleAiStudioProvedorDeIa : InterfaceProvedorDeIa
 
         return texto.GetString() ?? throw new FalhaNoProvedorDeIaException();
     }
+
+    /// <summary>
+    /// Traduz o conteúdo de uma mensagem do histórico (string para
+    /// <c>"usuario"</c>, contrato estruturado para <c>"assistente"</c>) para
+    /// texto simples enviado ao provedor.
+    /// </summary>
+    private static string ConteudoComoTexto(object conteudo) =>
+        conteudo switch
+        {
+            string texto => texto,
+            _ => JsonSerializer.Serialize(conteudo)
+        };
 }

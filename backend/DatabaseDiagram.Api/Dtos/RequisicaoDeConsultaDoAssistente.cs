@@ -23,4 +23,10 @@ public sealed class RequisicaoDeConsultaDoAssistente
 
     [Required(ErrorMessage = "O contexto do banco é obrigatório.")]
     public EsquemaDeBanco? ContextoDeBanco { get; set; }
+
+    /// <summary>
+    /// Id opcional da conversa (US1/FR-002). Sem <c>conversaId</c>: fluxo
+    /// legado de troca única, sem histórico e sem persistência.
+    /// </summary>
+    public Guid? ConversaId { get; set; }
 }
