@@ -1,4 +1,5 @@
 using DatabaseDiagram.Api.Provedores;
+using DatabaseDiagram.Api.Provedores.Ia.Claude;
 using DatabaseDiagram.Api.Provedores.Ia.GoogleAiStudio;
 using DatabaseDiagram.Api.Provedores.Ia.OpenAi;
 
@@ -35,13 +36,27 @@ public class FabricaDeProvedoresDeIaTestes
     }
 
     [Fact]
+    public void Obter_ComTipoClaude_RetornaProvedorDoClaude()
+    {
+        using var httpClient = new HttpClient();
+        var fabrica = new FabricaDeProvedoresDeIa([
+            new ClaudeProvedorDeIa(httpClient)
+        ]);
+
+        var provedor = fabrica.Obter("claude");
+
+        Assert.IsType<ClaudeProvedorDeIa>(provedor);
+        Assert.Equal("claude", provedor.Tipo);
+    }
+
+    [Fact]
     public void Obter_ComTipoDesconhecido_LancaProvedorDeIaNaoSuportadoException()
     {
         var fabrica = new FabricaDeProvedoresDeIa([]);
 
-        var excecao = Assert.Throws<ProvedorDeIaNaoSuportadoException>(() => fabrica.Obter("claude"));
+        var excecao = Assert.Throws<ProvedorDeIaNaoSuportadoException>(() => fabrica.Obter("deepseek"));
 
-        Assert.Equal("claude", excecao.Provedor);
+        Assert.Equal("deepseek", excecao.Provedor);
     }
 
     [Fact]

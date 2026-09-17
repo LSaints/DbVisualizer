@@ -3,6 +3,7 @@ using DatabaseDiagram.Api.Controladores;
 using DatabaseDiagram.Api.Dtos;
 using DatabaseDiagram.Api.Infraestrutura;
 using DatabaseDiagram.Api.Provedores;
+using DatabaseDiagram.Api.Provedores.Ia.Claude;
 using DatabaseDiagram.Api.Provedores.Ia.GoogleAiStudio;
 using DatabaseDiagram.Api.Provedores.Ia.OpenAi;
 using DatabaseDiagram.Api.Provedores.MySql;
@@ -91,6 +92,15 @@ builder.Services.AddSingleton<InterfaceProvedorDeIa>(provedor =>
     new GoogleAiStudioProvedorDeIa(
         provedor.GetRequiredService<IHttpClientFactory>()
             .CreateClient(GoogleAiStudioProvedorDeIa.NomeDoCliente)));
+
+// Claude (Anthropic Messages): o mesmo contrato e o mesmo fluxo; a chave via
+// cabeçalho `x-api-key` + `anthropic-version`, nunca na URL query nem em logs.
+builder.Services.AddHttpClient(ClaudeProvedorDeIa.NomeDoCliente, cliente =>
+    cliente.Timeout = TimeSpan.FromSeconds(90));
+builder.Services.AddSingleton<InterfaceProvedorDeIa>(provedor =>
+    new ClaudeProvedorDeIa(
+        provedor.GetRequiredService<IHttpClientFactory>()
+            .CreateClient(ClaudeProvedorDeIa.NomeDoCliente)));
 
 builder.Services.AddSingleton<FabricaDeProvedoresDeIa>();
 builder.Services.AddSingleton<ConstrutorDeContextoDeBanco>();

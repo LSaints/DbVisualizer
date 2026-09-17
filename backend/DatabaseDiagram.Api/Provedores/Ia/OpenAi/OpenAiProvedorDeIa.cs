@@ -35,6 +35,17 @@ public sealed class OpenAiProvedorDeIa : InterfaceProvedorDeIa
 
     public string Rotulo => "OpenAI";
 
+    /// <summary>
+    /// Serializa o histórico no formato do contrato (camelCase/snake_case das
+    /// chaves mapeadas com <c>JsonPropertyName</c>). As opções padrão
+    /// produziriam PascalCase e induziriam o modelo a ecoar esse formato,
+    /// quebrando a validação do contrato na conversa seguinte.
+    /// </summary>
+    private static readonly JsonSerializerOptions OpcoesDeContrato = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+    };
+
     public async Task<string> ObterRespostaAsync(
         PedidoDeResposta pedido,
         string chaveDeApi,
@@ -92,6 +103,6 @@ public sealed class OpenAiProvedorDeIa : InterfaceProvedorDeIa
         conteudo switch
         {
             string texto => texto,
-            _ => JsonSerializer.Serialize(conteudo)
+            _ => JsonSerializer.Serialize(conteudo, OpcoesDeContrato)
         };
 }

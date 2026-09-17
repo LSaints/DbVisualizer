@@ -100,7 +100,7 @@ public class AssistenteControladorTestes
     {
         var controlador = CriarControlador(out _);
         var requisicao = CriarRequisicaoValida();
-        requisicao.ProvedorDeIa = "claude";
+        requisicao.ProvedorDeIa = "deepseek";
 
         var resultado = await controlador.ObterResposta(requisicao, CancellationToken.None);
 

@@ -90,6 +90,12 @@ public sealed class ServicoDoAssistente
         {
             throw;
         }
+        // Erros já tipados do provedor (ex.: com o status HTTP) são repassados
+        // como estão; erros inesperados viram a falha genérica (FR-015/G6).
+        catch (FalhaNoProvedorDeIaException)
+        {
+            throw;
+        }
         catch (Exception)
         {
             throw new FalhaNoProvedorDeIaException();

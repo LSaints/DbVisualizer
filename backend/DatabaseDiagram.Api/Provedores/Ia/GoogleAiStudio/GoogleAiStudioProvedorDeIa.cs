@@ -38,6 +38,17 @@ public sealed class GoogleAiStudioProvedorDeIa : InterfaceProvedorDeIa
 
     public string Rotulo => "Google AI Studio";
 
+    /// <summary>
+    /// Serializa o histórico no formato do contrato (camelCase/snake_case das
+    /// chaves mapeadas com <c>JsonPropertyName</c>). As opções padrão
+    /// produziriam PascalCase e induziriam o modelo a ecoar esse formato,
+    /// quebrando a validação do contrato na conversa seguinte.
+    /// </summary>
+    private static readonly JsonSerializerOptions OpcoesDeContrato = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+    };
+
     public async Task<string> ObterRespostaAsync(
         PedidoDeResposta pedido,
         string chaveDeApi,
@@ -115,6 +126,6 @@ public sealed class GoogleAiStudioProvedorDeIa : InterfaceProvedorDeIa
         conteudo switch
         {
             string texto => texto,
-            _ => JsonSerializer.Serialize(conteudo)
+            _ => JsonSerializer.Serialize(conteudo, OpcoesDeContrato)
         };
 }

@@ -121,10 +121,12 @@ public sealed class AssistenteControlador(
                 StatusCodes.Status422UnprocessableEntity,
                 new { mensagem = MensagensDeValidacao.RespostaDoAssistenteInvalida });
         }
-        catch (FalhaNoProvedorDeIaException)
+        catch (FalhaNoProvedorDeIaException excecao)
         {
-            // Nunca loga a chave, o corpo do pedido ou o contexto em claro.
+            // Nunca loga a chave, o corpo do pedido ou o contexto em claro; a
+            // mensagem traz apenas o motivo genérico/status do provedor.
             logger.LogInformation(
+                excecao,
                 "Falha ao gerar consulta pelo provedor de IA '{ProvedorDeIa}'.",
                 requisicao!.ProvedorDeIa);
             return StatusCode(
