@@ -106,6 +106,16 @@ describe('PaginaDoAssistente', () => {
     });
   });
 
+  /** Abre o modal de configurações e cadastra o token do provedor informado (US1). */
+  async function configurarToken(provedor: string, rotulo: string, token: string): Promise<void> {
+    await userEvent.click(screen.getByRole('button', { name: 'Configurações' }));
+    await userEvent.selectOptions(screen.getByLabelText('Provedor a configurar'), provedor);
+    await userEvent.type(screen.getByLabelText('Token do provedor'), token);
+    await userEvent.click(screen.getByRole('button', { name: 'Salvar' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Fechar' }));
+    void rotulo;
+  }
+
   it('enviar um pedido muda o estado para "gerando resposta" e termina em sucesso com o cartão', async () => {
     let liberarResposta: (valor: { resposta: RespostaDeConsultaDoAssistente; contextoTruncado: boolean }) => void =
       () => undefined;
@@ -117,7 +127,7 @@ describe('PaginaDoAssistente', () => {
 
     render(<PaginaDoAssistente contextoDeBanco={contextoDeBanco} aoVoltar={() => undefined} />);
 
-    await userEvent.type(screen.getByLabelText('Chave de API'), 'sk-teste');
+    await configurarToken('openai', 'OpenAI', 'sk-teste');
     await userEvent.type(
       screen.getByPlaceholderText('Descreva a consulta desejada...'),
       'quero listar os contratos'
@@ -125,7 +135,11 @@ describe('PaginaDoAssistente', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Enviar' }));
 
     expect(vi.mocked(gerarConsulta)).toHaveBeenCalledWith(
-      expect.objectContaining({ mensagem: 'quero listar os contratos', chaveDeApi: 'sk-teste' }),
+      expect.objectContaining({
+        mensagem: 'quero listar os contratos',
+        chaveDeApi: 'sk-teste',
+        provedorDeIa: 'openai'
+      }),
       expect.any(AbortSignal)
     );
 
@@ -141,20 +155,13 @@ describe('PaginaDoAssistente', () => {
     expect(screen.getByText('Lista todos os contratos.')).toBeInTheDocument();
   });
 
-  it('seleciona o provedor e informa a chave em campo de senha; a chave não aparece em tela nem em log (SC-002)', async () => {
-    const logar = vi.spyOn(console, 'log').mockImplementation(() => undefined);
-
+  it('configurar o token pelo modal define o provedor como padrão e habilita o badge (US1)', async () => {
     render(<PaginaDoAssistente contextoDeBanco={contextoDeBanco} aoVoltar={() => undefined} />);
 
-    const campoDaChave = screen.getByLabelText('Chave de API');
-    expect(campoDaChave).toHaveAttribute('type', 'password');
+    await configurarToken('google-ai-studio', 'Google AI Studio', 'sk-secreta-nao-loge');
 
-    await screen.findByRole('option', { name: 'Google AI Studio' });
-    await userEvent.selectOptions(
-      screen.getByLabelText('Provedor de IA'),
-      'google-ai-studio'
-    );
-    await userEvent.type(campoDaChave, 'sk-secreta-nao-loge');
+    expect(screen.getByRole('button', { name: 'Google AI Studio' })).toHaveAttribute('aria-pressed', 'true');
+
     await userEvent.type(
       screen.getByPlaceholderText('Descreva a consulta desejada...'),
       'quero listar os contratos'
@@ -170,9 +177,44 @@ describe('PaginaDoAssistente', () => {
     );
 
     expect(screen.queryByText('sk-secreta-nao-loge')).not.toBeInTheDocument();
-    const registros = logar.mock.calls.flat().join(' ');
-    expect(registros).not.toContain('sk-secreta-nao-loge');
-    logar.mockRestore();
+  });
+
+  it('trocar o provedor pelo badge muda o provedorDeIa enviado em gerarConsulta (US2)', async () => {
+    render(<PaginaDoAssistente contextoDeBanco={contextoDeBanco} aoVoltar={() => undefined} />);
+
+    await configurarToken('openai', 'OpenAI', 'sk-openai');
+    await configurarToken('google-ai-studio', 'Google AI Studio', 'sk-google');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Google AI Studio' }));
+    expect(screen.getByRole('button', { name: 'Google AI Studio' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'OpenAI' })).toHaveAttribute('aria-pressed', 'false');
+
+    await userEvent.type(
+      screen.getByPlaceholderText('Descreva a consulta desejada...'),
+      'quero listar os contratos'
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Enviar' }));
+
+    expect(vi.mocked(gerarConsulta)).toHaveBeenCalledWith(
+      expect.objectContaining({ provedorDeIa: 'google-ai-studio' }),
+      expect.any(AbortSignal)
+    );
+  });
+
+  it('sem provedor configurado, Enviar fica desabilitado e orienta a abrir Configurações (FR-014)', async () => {
+    render(<PaginaDoAssistente contextoDeBanco={contextoDeBanco} aoVoltar={() => undefined} />);
+
+    const botaoConfigurar = screen.getByRole('button', { name: 'Configurar provedor' });
+    expect(botaoConfigurar).toBeInTheDocument();
+
+    await userEvent.type(
+      screen.getByPlaceholderText('Descreva a consulta desejada...'),
+      'quero listar os contratos'
+    );
+    expect(screen.getByRole('button', { name: 'Enviar' })).toBeDisabled();
+
+    await userEvent.click(botaoConfigurar);
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
   });
 
   it('mantém todas as mensagens visíveis na ordem e cada resposta antiga completa e copiável (FR-011/FR-012)', async () => {
@@ -181,6 +223,7 @@ describe('PaginaDoAssistente', () => {
       .mockResolvedValueOnce({ resposta: segundaResposta, contextoTruncado: false });
 
     render(<PaginaDoAssistente contextoDeBanco={contextoDeBanco} aoVoltar={() => undefined} />);
+    await configurarToken('openai', 'OpenAI', 'sk-teste');
 
     await enviarPedido('quero listar os contratos');
     await enviarPedido('quero os clientes ativos');
@@ -217,6 +260,7 @@ describe('PaginaDoAssistente', () => {
     } satisfies Conversa);
 
     render(<PaginaDoAssistente contextoDeBanco={contextoDeBanco} aoVoltar={() => undefined} />);
+    await configurarToken('openai', 'OpenAI', 'sk-teste');
 
     await enviarPedido('quero listar os contratos');
     expect(screen.getByText('SELECT c.* FROM contratos c;')).toBeInTheDocument();
@@ -253,6 +297,7 @@ describe('PaginaDoAssistente', () => {
       .mockResolvedValueOnce({ resposta: segundaResposta, contextoTruncado: false });
 
     render(<PaginaDoAssistente contextoDeBanco={contextoDeBanco} aoVoltar={() => undefined} />);
+    await configurarToken('openai', 'OpenAI', 'sk-teste');
 
     await userEvent.click(await screen.findByRole('button', { name: 'Contratos' }));
     await enviarPedido('quero listar os contratos');
@@ -330,14 +375,105 @@ describe('PaginaDoAssistente', () => {
     expect(await screen.findByText(/banco conectado atualmente difere/i)).toBeInTheDocument();
   });
 
-  it('chave inválida ou indisponível mostra aviso orientado à ação sem expor a chave (FR-014)', async () => {
-    vi.mocked(gerarConsulta).mockRejectedValue(
-      new Error('Não foi possível gerar a consulta pelo provedor selecionado.')
-    );
+  it('ao abrir uma conversa com provedorDeIa informado, o badge selecionado reflete esse provedor (US3/SC-004)', async () => {
+    vi.mocked(listarConversas).mockResolvedValue([
+      {
+        id: 'conversa-1',
+        titulo: 'Contratos',
+        criadaEm: '2026-01-01T00:00:00Z',
+        atualizadaEm: '2026-01-01T00:00:00Z',
+        resumo: 'Conversa vazia'
+      }
+    ] satisfies Conversa[]);
+    vi.mocked(obterConversa).mockResolvedValue({
+      id: 'conversa-1',
+      titulo: 'Contratos',
+      criadaEm: '2026-01-01T00:00:00Z',
+      atualizadaEm: '2026-01-01T00:00:00Z',
+      resumo: 'Conversa vazia',
+      contextoDeBanco: { provedor: 'mysql', nomeDoBanco: 'erp' },
+      provedorDeIa: 'google-ai-studio',
+      mensagens: []
+    } satisfies ConversaDetalhada);
 
     render(<PaginaDoAssistente contextoDeBanco={contextoDeBanco} aoVoltar={() => undefined} />);
+    await configurarToken('openai', 'OpenAI', 'sk-openai');
+    await configurarToken('google-ai-studio', 'Google AI Studio', 'sk-google');
 
-    await userEvent.type(screen.getByLabelText('Chave de API'), 'sk-invalida-chave');
+    await userEvent.click(await screen.findByRole('button', { name: 'Contratos' }));
+
+    expect(await screen.findByRole('button', { name: 'Google AI Studio' })).toHaveAttribute(
+      'aria-pressed',
+      'true'
+    );
+  });
+
+  it('conversa com provedor não configurado na sessão cai para o padrão com aviso (US3/FR-017)', async () => {
+    vi.mocked(listarConversas).mockResolvedValue([
+      {
+        id: 'conversa-1',
+        titulo: 'Contratos',
+        criadaEm: '2026-01-01T00:00:00Z',
+        atualizadaEm: '2026-01-01T00:00:00Z',
+        resumo: 'Conversa vazia'
+      }
+    ] satisfies Conversa[]);
+    vi.mocked(obterConversa).mockResolvedValue({
+      id: 'conversa-1',
+      titulo: 'Contratos',
+      criadaEm: '2026-01-01T00:00:00Z',
+      atualizadaEm: '2026-01-01T00:00:00Z',
+      resumo: 'Conversa vazia',
+      contextoDeBanco: { provedor: 'mysql', nomeDoBanco: 'erp' },
+      provedorDeIa: 'claude',
+      mensagens: []
+    } satisfies ConversaDetalhada);
+
+    render(<PaginaDoAssistente contextoDeBanco={contextoDeBanco} aoVoltar={() => undefined} />);
+    await configurarToken('openai', 'OpenAI', 'sk-openai');
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Contratos' }));
+
+    expect(screen.getByRole('button', { name: 'OpenAI' })).toHaveAttribute('aria-pressed', 'true');
+    expect(
+      await screen.findByText(/provedor desta conversa não está mais configurado/i)
+    ).toBeInTheDocument();
+  });
+
+  it('conversa sem provedorDeIa usa o provedorPadrao da sessão (US3/C7)', async () => {
+    vi.mocked(listarConversas).mockResolvedValue([
+      {
+        id: 'conversa-1',
+        titulo: 'Legada',
+        criadaEm: '2026-01-01T00:00:00Z',
+        atualizadaEm: '2026-01-01T00:00:00Z',
+        resumo: 'Conversa vazia'
+      }
+    ] satisfies Conversa[]);
+    vi.mocked(obterConversa).mockResolvedValue({
+      id: 'conversa-1',
+      titulo: 'Legada',
+      criadaEm: '2026-01-01T00:00:00Z',
+      atualizadaEm: '2026-01-01T00:00:00Z',
+      resumo: 'Conversa vazia',
+      contextoDeBanco: { provedor: 'mysql', nomeDoBanco: 'erp' },
+      mensagens: []
+    } satisfies ConversaDetalhada);
+
+    render(<PaginaDoAssistente contextoDeBanco={contextoDeBanco} aoVoltar={() => undefined} />);
+    await configurarToken('openai', 'OpenAI', 'sk-openai');
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Legada' }));
+
+    expect(screen.getByRole('button', { name: 'OpenAI' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('erro de envio com token inválido mostra mensagem genérica sem nenhum trecho da chave (FR-014/US4)', async () => {
+    vi.mocked(gerarConsulta).mockRejectedValue(new Error('token sk-invalida-chave rejeitado pelo provedor'));
+
+    render(<PaginaDoAssistente contextoDeBanco={contextoDeBanco} aoVoltar={() => undefined} />);
+    await configurarToken('openai', 'OpenAI', 'sk-invalida-chave');
+
     await userEvent.type(
       screen.getByPlaceholderText('Descreva a consulta desejada...'),
       'quero listar os contratos'
@@ -349,6 +485,7 @@ describe('PaginaDoAssistente', () => {
     ).toBeInTheDocument();
 
     expect(screen.queryByText('sk-invalida-chave')).not.toBeInTheDocument();
+    expect(screen.queryByText(/token sk-invalida-chave/)).not.toBeInTheDocument();
   });
 
   it('sem banco conectado o envio fica bloqueado com aviso de contexto ausente (FR-006)', async () => {
@@ -359,7 +496,7 @@ describe('PaginaDoAssistente', () => {
     expect(screen.getByTitle('Nenhum banco conectado')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Enviar' })).toBeDisabled();
 
-    await userEvent.type(screen.getByLabelText('Chave de API'), 'sk-teste');
+    await configurarToken('openai', 'OpenAI', 'sk-teste');
     await userEvent.type(
       screen.getByPlaceholderText('Descreva a consulta desejada...'),
       'quero listar os contratos'
@@ -381,8 +518,8 @@ describe('PaginaDoAssistente', () => {
     });
 
     render(<PaginaDoAssistente contextoDeBanco={contextoDeBanco} aoVoltar={() => undefined} />);
+    await configurarToken('openai', 'OpenAI', 'sk-teste');
 
-    await userEvent.type(screen.getByLabelText('Chave de API'), 'sk-teste');
     await userEvent.type(
       screen.getByPlaceholderText('Descreva a consulta desejada...'),
       'quero listar os contratos'
@@ -418,8 +555,8 @@ describe('PaginaDoAssistente', () => {
     vi.mocked(gerarConsulta).mockResolvedValue({ resposta: respostaDeEscrita, contextoTruncado: false });
 
     render(<PaginaDoAssistente contextoDeBanco={contextoDeBanco} aoVoltar={() => undefined} />);
+    await configurarToken('openai', 'OpenAI', 'sk-teste');
 
-    await userEvent.type(screen.getByLabelText('Chave de API'), 'sk-teste');
     await userEvent.type(
       screen.getByPlaceholderText('Descreva a consulta desejada...'),
       'atualizar todos os contratos'
@@ -436,6 +573,7 @@ describe('PaginaDoAssistente', () => {
     vi.mocked(gerarConsulta).mockResolvedValue({ resposta, contextoTruncado: true });
 
     render(<PaginaDoAssistente contextoDeBanco={contextoDeBanco} aoVoltar={() => undefined} />);
+    await configurarToken('openai', 'OpenAI', 'sk-teste');
 
     await enviarPedido('quero listar os contratos');
 
@@ -528,16 +666,15 @@ describe('PaginaDoAssistente', () => {
 
     expect(vi.mocked(renomearConversa)).toHaveBeenCalledWith('conversa-1', 'Contratos ativos');
   });
+
+  async function enviarPedido(textoDoPedido: string): Promise<void> {
+    await userEvent.type(
+      screen.getByPlaceholderText('Descreva a consulta desejada...'),
+      textoDoPedido
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Enviar' }));
+
+    const cartoes = await screen.findAllByText(/^SELECT/, { selector: 'code' });
+    expect(cartoes.length).toBeGreaterThan(0);
+  }
 });
-
-async function enviarPedido(textoDoPedido: string): Promise<void> {
-  await userEvent.type(screen.getByLabelText('Chave de API'), 'sk-teste');
-  await userEvent.type(
-    screen.getByPlaceholderText('Descreva a consulta desejada...'),
-    textoDoPedido
-  );
-  await userEvent.click(screen.getByRole('button', { name: 'Enviar' }));
-
-  const cartoes = await screen.findAllByText(/^SELECT/, { selector: 'code' });
-  expect(cartoes.length).toBeGreaterThan(0);
-}

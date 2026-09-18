@@ -108,20 +108,22 @@ export function ListaDeConversas({
                   </time>
                   <span className="resumo-da-conversa">{conversa.resumo}</span>
                 </button>
-                <button
-                  type="button"
-                  aria-label={`Renomear ${conversa.titulo}`}
-                  onClick={() => iniciarRenomeacao(conversa)}
-                >
-                  Renomear
-                </button>
-                <button
-                  type="button"
-                  aria-label={`Excluir ${conversa.titulo}`}
-                  onClick={() => confirmarExclusao(conversa)}
-                >
-                  Excluir
-                </button>
+                <div className="acoes-de-conversa">
+                  <button
+                    type="button"
+                    aria-label={`Renomear ${conversa.titulo}`}
+                    onClick={() => iniciarRenomeacao(conversa)}
+                  >
+                    Renomear
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={`Excluir ${conversa.titulo}`}
+                    onClick={() => confirmarExclusao(conversa)}
+                  >
+                    Excluir
+                  </button>
+                </div>
               </>
             )}
           </li>

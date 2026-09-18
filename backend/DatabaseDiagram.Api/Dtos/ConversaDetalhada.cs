@@ -19,5 +19,12 @@ public sealed class ConversaDetalhada
 
     public Modelos.IdentidadeDeBanco? ContextoDeBanco { get; set; }
 
+    /// <summary>
+    /// Identificador do provedor de IA da conversa (<c>openai</c>,
+    /// <c>google-ai-studio</c>, <c>claude</c>…); nulo/ausente em conversas
+    /// antigas (FR-012/contracts/api.md).
+    /// </summary>
+    public string? ProvedorDeIa { get; set; }
+
     public List<Modelos.MensagemDaConversa> Mensagens { get; set; } = [];
 }

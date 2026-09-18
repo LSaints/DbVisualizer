@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { CartaoDeRespostaDeConsulta } from '../componentes/CartaoDeRespostaDeConsulta';
-import { ConfiguracaoDoAssistente } from '../componentes/ConfiguracaoDoAssistente';
 import { ListaDeConversas } from '../componentes/ListaDeConversas';
+import { ModalDeConfiguracaoDeProvedores } from '../componentes/ModalDeConfiguracaoDeProvedores';
+import { EntradaDeChat } from '../componentes/EntradaDeChat';
 import type { EsquemaDeBanco } from '../modelos/tipos';
 import type {
   Conversa,
   IdentidadeDeBanco,
+  ProvedorConfigurado,
   ProvedorDeIaDisponivel,
   RespostaDeConsultaDoAssistente
 } from '../modelos/tiposDoAssistente';
@@ -42,17 +44,26 @@ interface Propriedades {
  * o estado da atual (US2/US3/US4). Um follow-up sobre a mesma conversa
  * (`conversaId`) envia o histórico como contexto ao provedor; quando o header
  * `X-Contexto-Truncado` vem `true`, um aviso sutil informa que somente as
- * mensagens mais recentes foram usadas (US5). A chave de API é usada somente
- * em memória, por requisição, e nunca aparece em tela após configurada.
+ * mensagens mais recentes foram usadas (US5).
+ *
+ * Os provedores de IA e seus tokens são configurados em um modal
+ * (`ModalDeConfiguracaoDeProvedores` — US1) e vivem somente em memória da
+ * sessão (`chavesPorProvedor` + `provedorPadrao` — constituição III/FR-015).
+ * O rodapé do chat exibe um `SeletorDeProvedor` (badges) para trocar o
+ * provedor ativo sem abrir configurações (US2); o provedor ativo é associado
+ * à conversa e restaurado ao reabri-la (US3).
  */
 export function PaginaDoAssistente({ contextoDeBanco, aoVoltar }: Propriedades) {
   const [provedores, setProvedores] = useState<ProvedorDeIaDisponivel[]>([]);
-  const [provedorDeIa, setProvedorDeIa] = useState('openai');
-  const [chaveDeApi, setChaveDeApi] = useState('');
+  const [chavesPorProvedor, setChavesPorProvedor] = useState<Record<string, string>>({});
+  const [provedorPadrao, setProvedorPadrao] = useState<string | null>(null);
+  const [provedorSelecionado, setProvedorSelecionado] = useState<string | null>(null);
+  const [modalAberto, setModalAberto] = useState(false);
   const [mensagem, setMensagem] = useState('');
   const [estado, setEstado] = useState<EstadoDoChat>('pronto');
   const [mensagens, setMensagens] = useState<MensagemDoChat[]>([]);
   const [mensagemDeErro, setMensagemDeErro] = useState('');
+  const [avisoDeConfiguracao, setAvisoDeConfiguracao] = useState('');
   const [conversas, setConversas] = useState<Conversa[]>([]);
   const [conversaId, setConversaId] = useState<string | null>(null);
   const [contextoDaConversa, setContextoDaConversa] = useState<IdentidadeDeBanco | null>(null);
@@ -63,17 +74,8 @@ export function PaginaDoAssistente({ contextoDeBanco, aoVoltar }: Propriedades) 
 
   useEffect(() => {
     listarProvedores()
-      .then((provedoresDisponiveis) => {
-        setProvedores(provedoresDisponiveis);
-        setProvedorDeIa((atual) =>
-          provedoresDisponiveis.some((provedor) => provedor.provedor === atual)
-            ? atual
-            : (provedoresDisponiveis[0]?.provedor ?? atual)
-        );
-      })
-      .catch(() => {
-        setProvedores([]);
-      });
+      .then(setProvedores)
+      .catch(() => setProvedores([]));
 
     listarConversas()
       .then(setConversas)
@@ -115,6 +117,7 @@ export function PaginaDoAssistente({ contextoDeBanco, aoVoltar }: Propriedades) 
     resetarChatLocal();
     setConversaId(null);
     setContextoDaConversa(null);
+    setProvedorSelecionado(provedorPadrao);
 
     criarConversa()
       .then((conversa) => {
@@ -145,6 +148,21 @@ export function PaginaDoAssistente({ contextoDeBanco, aoVoltar }: Propriedades) 
               : mensagemDaConversa.conteudo
         }))
       );
+
+      const provedorDaConversa = detalhada.provedorDeIa;
+      if (provedorDaConversa != null && chavesPorProvedor[provedorDaConversa]) {
+        setProvedorSelecionado(provedorDaConversa);
+        setAvisoDeConfiguracao('');
+      } else {
+        setProvedorSelecionado(provedorPadrao);
+        if (provedorDaConversa != null && !chavesPorProvedor[provedorDaConversa]) {
+          setAvisoDeConfiguracao(
+            'O provedor desta conversa não está mais configurado; usando o provedor padrão.'
+          );
+        } else {
+          setAvisoDeConfiguracao('');
+        }
+      }
     } catch {
       setMensagemDeErro('Não foi possível abrir a conversa.');
       setEstado('erro');
@@ -176,15 +194,53 @@ export function PaginaDoAssistente({ contextoDeBanco, aoVoltar }: Propriedades) 
     setEstado('pronto');
   }
 
+  function salvarChaveDeProvedor(provedor: string, token: string): void {
+    setChavesPorProvedor((anteriores) => ({ ...anteriores, [provedor]: token }));
+    setProvedorPadrao((atual) => atual ?? provedor);
+    setProvedorSelecionado((atual) => atual ?? provedor);
+  }
+
+  function removerChaveDeProvedor(provedor: string): void {
+    setChavesPorProvedor((anteriores) => {
+      const proximas = { ...anteriores };
+      delete proximas[provedor];
+      return proximas;
+    });
+
+    setProvedorPadrao((atual) => {
+      if (atual !== provedor) {
+        return atual;
+      }
+      const restantes = Object.keys(chavesPorProvedor).filter((item) => item !== provedor);
+      return restantes[0] ?? null;
+    });
+
+    setProvedorSelecionado((atual) => {
+      if (atual !== provedor) {
+        return atual;
+      }
+      const restantes = Object.keys(chavesPorProvedor).filter((item) => item !== provedor);
+      return restantes[0] ?? null;
+    });
+  }
+
+  const provedoresConfigurados: ProvedorConfigurado[] = provedores
+    .filter((provedor) => Boolean(chavesPorProvedor[provedor.provedor]))
+    .map((provedor) => ({
+      provedor: provedor.provedor,
+      rotulo: provedor.rotulo,
+      tokenConfigurado: true
+    }));
+
+  const chaveDoProvedorSelecionado =
+    provedorSelecionado != null ? chavesPorProvedor[provedorSelecionado] : undefined;
+
   const podeEnviar =
     contextoDeBanco != null &&
     estado !== 'gerando' &&
-    chaveDeApi.trim() !== '' &&
+    provedorSelecionado != null &&
+    Boolean(chaveDoProvedorSelecionado) &&
     mensagem.trim().length >= 3;
-
-  const provedorAtivo = provedores.find(
-    (provedor) => provedor.provedor === provedorDeIa
-  );
 
   const bancoDivergente =
     contextoDaConversa != null &&
@@ -199,9 +255,15 @@ export function PaginaDoAssistente({ contextoDeBanco, aoVoltar }: Propriedades) 
     if (
       contextoDeBanco == null ||
       texto.length < 3 ||
-      chaveDeApi.trim() === '' ||
+      provedorSelecionado == null ||
+      !chaveDoProvedorSelecionado ||
       estado === 'gerando'
     ) {
+      if (provedorSelecionado == null || !chaveDoProvedorSelecionado) {
+        setAvisoDeConfiguracao(
+          'Configure um provedor de IA em "Configurações" para enviar mensagens.'
+        );
+      }
       return;
     }
 
@@ -210,6 +272,7 @@ export function PaginaDoAssistente({ contextoDeBanco, aoVoltar }: Propriedades) 
     controladorRef.current = controlador;
 
     setMensagemDeErro('');
+    setAvisoDeConfiguracao('');
     setEstado('gerando');
     setMensagens((anteriores) => [
       ...anteriores,
@@ -232,8 +295,8 @@ export function PaginaDoAssistente({ contextoDeBanco, aoVoltar }: Propriedades) 
 
       const { resposta, contextoTruncado: truncado } = await gerarConsulta(
         {
-          provedorDeIa,
-          chaveDeApi,
+          provedorDeIa: provedorSelecionado,
+          chaveDeApi: chaveDoProvedorSelecionado,
           mensagem: texto,
           contextoDeBanco,
           conversaId: conversaIdAtiva
@@ -263,12 +326,11 @@ export function PaginaDoAssistente({ contextoDeBanco, aoVoltar }: Propriedades) 
         return;
       }
 
-      setMensagemDeErro(
-        falha instanceof Error
-          ? falha.message
-          : 'Não foi possível gerar a consulta.'
-      );
+      // Mensagem sempre genérica: nunca expõe trecho do token, mesmo em
+      // falhas de autenticação do provedor (FR-014/SC-007).
+      setMensagemDeErro('Não foi possível gerar a consulta pelo provedor selecionado.');
       setEstado('erro');
+      void falha;
     }
   }
 
@@ -279,9 +341,6 @@ export function PaginaDoAssistente({ contextoDeBanco, aoVoltar }: Propriedades) 
           Voltar ao diagrama
         </button>
         <h2 className="titulo-do-assistente">Assistente de IA</h2>
-        <span className="provedor-ativo" title="Provedor ativo no chat">
-          {provedorAtivo?.rotulo ?? provedorDeIa}
-        </span>
         <span
           className={`contexto-ativo${contextoDeBanco == null ? ' contexto-ausente' : ''}`}
           title={
@@ -296,6 +355,18 @@ export function PaginaDoAssistente({ contextoDeBanco, aoVoltar }: Propriedades) 
         </span>
       </header>
 
+      {modalAberto && (
+        <ModalDeConfiguracaoDeProvedores
+          provedores={provedores}
+          chavesPorProvedor={chavesPorProvedor}
+          provedorPadrao={provedorPadrao}
+          aoSalvarChave={salvarChaveDeProvedor}
+          aoRemover={removerChaveDeProvedor}
+          aoDefinirPadrao={setProvedorPadrao}
+          aoFechar={() => setModalAberto(false)}
+        />
+      )}
+
       <div className="corpo-do-assistente">
         <ListaDeConversas
           conversas={conversas}
@@ -309,14 +380,6 @@ export function PaginaDoAssistente({ contextoDeBanco, aoVoltar }: Propriedades) 
         />
 
         <div className="conteudo-do-chat">
-          <ConfiguracaoDoAssistente
-            provedores={provedores}
-            provedorDeIa={provedorDeIa}
-            chaveDeApi={chaveDeApi}
-            aoAlterarProvedor={setProvedorDeIa}
-            aoAlterarChave={setChaveDeApi}
-          />
-
           {contextoDeBanco == null && (
             <div className="alerta-de-aviso" role="alert">
               <strong>Nenhum banco conectado.</strong>
@@ -338,6 +401,19 @@ export function PaginaDoAssistente({ contextoDeBanco, aoVoltar }: Propriedades) 
             <div className="alerta-de-aviso-sutil" role="status">
               O banco conectado atualmente difere do registrado nesta
               conversa. O histórico continua disponível para consulta.
+            </div>
+          )}
+
+          {avisoDeConfiguracao !== '' && (
+            <div className="alerta-de-aviso-sutil" role="status">
+              {avisoDeConfiguracao}{' '}
+              <button
+                type="button"
+                className="botao-secundario"
+                onClick={() => setModalAberto(true)}
+              >
+                Configurações
+              </button>
             </div>
           )}
 
@@ -389,18 +465,19 @@ export function PaginaDoAssistente({ contextoDeBanco, aoVoltar }: Propriedades) 
             )}
           </div>
 
-          <form className="entrada-do-chat" onSubmit={enviar}>
-            <textarea
-              placeholder="Descreva a consulta desejada..."
-              aria-label="Mensagem"
-              value={mensagem}
-              onChange={(evento) => setMensagem(evento.target.value)}
-              rows={3}
-            />
-            <button type="submit" className="botao-primario" disabled={!podeEnviar}>
-              Enviar
-            </button>
-          </form>
+          <EntradaDeChat
+            mensagem={mensagem}
+            aoAlterarMensagem={setMensagem}
+            aoEnviar={enviar}
+            podeEnviar={podeEnviar}
+            provedoresConfigurados={provedoresConfigurados}
+            provedorSelecionado={provedorSelecionado}
+            aoSelecionarProvedor={(provedor) => {
+              setProvedorSelecionado(provedor);
+              setAvisoDeConfiguracao('');
+            }}
+            aoAbrirConfiguracoes={() => setModalAberto(true)}
+          />
         </div>
       </div>
     </div>

@@ -111,6 +111,38 @@ public class ConversasControladorTestes : IDisposable
     }
 
     [Fact]
+    public async Task Obter_ConversaComProvedorDeIaPersistido_Retorna200ComProvedorDeIa()
+    {
+        var criada = await _controlador.Criar(null, CancellationToken.None);
+        var resumo = Assert.IsType<ConversaResumo>(Assert.IsType<ObjectResult>(criada).Value);
+        var servico = new ServicoDeConversas(_diretorioTemporario);
+        await servico.PersistirTrocaAsync(
+            resumo.Id,
+            new IdentidadeDeBanco { Provedor = "mysql", NomeDoBanco = "erp" },
+            "quero contratos",
+            new DatabaseDiagram.Api.Modelos.RespostaDeConsultaDoAssistente { Consulta = "SELECT 1;", Explicacao = "teste" },
+            "claude");
+
+        var resultado = await _controlador.Obter(resumo.Id, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(resultado);
+        var detalhada = Assert.IsType<ConversaDetalhada>(ok.Value);
+        Assert.Equal("claude", detalhada.ProvedorDeIa);
+    }
+
+    [Fact]
+    public async Task Obter_ConversaSemProvedorDeIa_Retorna200ComProvedorDeIaNulo()
+    {
+        var id = await CriarECapturarId();
+
+        var resultado = await _controlador.Obter(id, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(resultado);
+        var detalhada = Assert.IsType<ConversaDetalhada>(ok.Value);
+        Assert.Null(detalhada.ProvedorDeIa);
+    }
+
+    [Fact]
     public async Task Obter_ConversaInexistente_Retorna404()
     {
         var resultado = await _controlador.Obter(

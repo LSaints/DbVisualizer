@@ -94,5 +94,33 @@ export interface Conversa {
 /** Resposta de `GET /api/conversas/{id}`. */
 export interface ConversaDetalhada extends Conversa {
   contextoDeBanco?: IdentidadeDeBanco | null;
+  /**
+   * Identificador do provedor de IA da última seleção da conversa; ausente
+   * em conversas antigas — o frontend usa o provedor padrão da sessão
+   * (FR-012/contracts/api.md).
+   */
+  provedorDeIa?: string;
   mensagens: MensagemDaConversa[];
+}
+
+/**
+ * Configuração de sessão dos provedores de IA (efêmera, somente em memória do
+ * frontend — constituição III/FR-015). Nunca é persistida nem enviada a
+ * nenhum endpoint além do corpo de `POST /api/assistente/consultas`.
+ */
+export interface ConfiguracaoDeSessao {
+  /** Token por provedor suportado pela fábrica; nunca exibido por completo. */
+  chavesPorProvedor: Record<string, string>;
+  /** Provedor padrão da sessão; inicia com o 1º provedor configurado. */
+  provedorPadrao: string | null;
+}
+
+/**
+ * Provedor derivado da sessão para uso no modal e no seletor de badges —
+ * nunca carrega o valor do token, somente se está configurado.
+ */
+export interface ProvedorConfigurado {
+  provedor: string;
+  rotulo: string;
+  tokenConfigurado: boolean;
 }

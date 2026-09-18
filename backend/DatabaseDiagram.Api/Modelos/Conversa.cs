@@ -35,6 +35,14 @@ public sealed class Conversa
     public IdentidadeDeBanco? ContextoDeBanco { get; set; }
 
     /// <summary>
+    /// Identificador do provedor de IA da conversa (<c>openai</c>,
+    /// <c>google-ai-studio</c>, <c>claude</c>…); setado na 1ª troca persistida
+    /// que usar o provedor; nulo em conversas antigas → frontend usa o padrão
+    /// da sessão.
+    /// </summary>
+    public string? ProvedorDeIaSelecionado { get; set; }
+
+    /// <summary>
     /// Ordem cronológica das trocas; vazio logo após a criação.
     /// </summary>
     public List<MensagemDaConversa> Mensagens { get; set; } = [];

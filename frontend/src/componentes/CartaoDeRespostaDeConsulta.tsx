@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { RespostaDeConsultaDoAssistente } from '../modelos/tiposDoAssistente';
+import { formatarConsultaSqlParaExibicao } from '../utilitarios/formatarConsultaSql';
 
 interface Propriedades {
   resposta: RespostaDeConsultaDoAssistente;
@@ -40,7 +41,7 @@ export function CartaoDeRespostaDeConsulta({ resposta }: Propriedades) {
           </button>
         </div>
         <pre>
-          <code>{resposta.consulta}</code>
+          <code>{formatarConsultaSqlParaExibicao(resposta.consulta)}</code>
         </pre>
         <p className="tipo-de-consulta">{resposta.tipo_consulta}</p>
       </section>

@@ -100,7 +100,8 @@ public sealed class AssistenteControlador(
                     conversa.Id,
                     identidade,
                     requisicao.Mensagem!.Trim(),
-                    resposta);
+                    resposta,
+                    requisicao.ProvedorDeIa);
             }
 
             Response.Headers[CabecalhoDeContextoTruncado] = contextoTruncado ? "true" : "false";

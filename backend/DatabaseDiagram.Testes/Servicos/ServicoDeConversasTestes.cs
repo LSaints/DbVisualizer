@@ -440,6 +440,84 @@ public class ServicoDeConversasTestes : IDisposable
         Assert.True(janela.Truncada);
     }
 
+    [Fact]
+    public async Task PersistirTrocaAsync_ComProvedorDeIaSelecionado_GravaERestauraNaDetalhada()
+    {
+        var servico = CriarServico();
+        var criada = await servico.CriarConversaAsync();
+        var contexto = new IdentidadeDeBanco
+        {
+            Provedor = "mysql",
+            NomeDoBanco = "erp"
+        };
+        var resposta = CriarRespostaPadrao();
+
+        await servico.PersistirTrocaAsync(
+            criada.Id,
+            contexto,
+            "quero contratos",
+            resposta,
+            "openai");
+
+        var detalhada = await servico.ObterConversaAsync(criada.Id);
+        Assert.NotNull(detalhada);
+        Assert.Equal("openai", detalhada!.ProvedorDeIa);
+
+        // Persistência: reabre em nova instância.
+        var servico2 = CriarServico();
+        var reaberta = await servico2.ObterConversaAsync(criada.Id);
+        Assert.Equal("openai", reaberta!.ProvedorDeIa);
+    }
+
+    [Fact]
+    public async Task PersistirTrocaAsync_TrocarDeProvedor_PreservaHistoricoERegrava()
+    {
+        var servico = CriarServico();
+        var criada = await servico.CriarConversaAsync();
+        var contexto = new IdentidadeDeBanco
+        {
+            Provedor = "mysql",
+            NomeDoBanco = "erp"
+        };
+
+        await servico.PersistirTrocaAsync(criada.Id, contexto, "primeira", CriarRespostaPadrao(), "openai");
+        await Task.Delay(10);
+        await servico.PersistirTrocaAsync(criada.Id, contexto, "segunda", CriarRespostaPadrao(), "deepseek");
+
+        var detalhada = await servico.ObterConversaAsync(criada.Id);
+        Assert.Equal("deepseek", detalhada!.ProvedorDeIa);
+        Assert.Equal(4, detalhada.Mensagens.Count); // histórico preservado
+        Assert.Equal("usuario", detalhada.Mensagens[0].Papel);
+        Assert.Equal("primeira", detalhada.Mensagens[0].Conteudo);
+        Assert.Equal("assistente", detalhada.Mensagens[3].Papel);
+    }
+
+    [Fact]
+    public async Task PersistirTrocaAsync_SemProvedorDeIa_ProvedorDeIaPermaneceNull()
+    {
+        var servico = CriarServico();
+        var criada = await servico.CriarConversaAsync();
+        var contexto = new IdentidadeDeBanco
+        {
+            Provedor = "mysql",
+            NomeDoBanco = "erp"
+        };
+
+        await servico.PersistirTrocaAsync(criada.Id, contexto, "mensagem", CriarRespostaPadrao());
+
+        var detalhada = await servico.ObterConversaAsync(criada.Id);
+        Assert.Null(detalhada!.ProvedorDeIa);
+    }
+
+    private RespostaDeConsultaDoAssistente CriarRespostaPadrao() => new()
+    {
+        Consulta = "SELECT * FROM contratos;",
+        Explicacao = "Lista.",
+        Objetivo = "Encontrar.",
+        TipoConsulta = "SELECT",
+        ResultadoEsperado = "Lista."
+    };
+
     private ServicoDeConversas CriarServico(int? quantidadeMaximaDeMensagens = null)
     {
         return new ServicoDeConversas(

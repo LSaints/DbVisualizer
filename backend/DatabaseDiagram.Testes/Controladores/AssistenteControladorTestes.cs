@@ -260,6 +260,26 @@ public class AssistenteControladorTestes
     }
 
     [Fact]
+    public async Task ObterResposta_ComConversaId_PersisteOProvedorDeIaDaRequisicao()
+    {
+        var controlador = CriarControlador(out _, out var servicoDeConversas);
+        var conversa = await servicoDeConversas.CriarConversaAsync();
+
+        var requisicao = CriarRequisicaoValida();
+        requisicao.ConversaId = Guid.Parse(conversa.Id);
+        requisicao.ProvedorDeIa = "openai";
+
+        var resultado = await controlador.ObterResposta(requisicao, CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(resultado);
+        var detalhada = await servicoDeConversas.ObterConversaAsync(conversa.Id);
+        Assert.Equal("openai", detalhada!.ProvedorDeIa);
+        Assert.Equal(2, detalhada.Mensagens.Count);
+        Assert.Equal("usuario", detalhada.Mensagens[0].Papel);
+        Assert.Equal("assistente", detalhada.Mensagens[1].Papel);
+    }
+
+    [Fact]
     public async Task ObterResposta_QuandoOProvedorFalha_NaoPersisteNada()
     {
         var fabrica = new FabricaDeProvedoresDeIa([new ProvedorDeIaFalsoFalhando()]);

@@ -198,18 +198,25 @@ public sealed class ServicoDeConversas
     /// <summary>
     /// Persiste o par usuário+assistente em uma conversa existente.
     /// Aplica sanitização (D8), título automático (D6) e escrita atômica (D9).
-    /// Somente chamado em sucesso da geração (D5).
+    /// Somente chamado em sucesso da geração (D5). O provedor de IA é gravado
+    /// apenas quando não-vazio, na 1ª troca que o usar (FR-012).
     /// </summary>
     public async Task PersistirTrocaAsync(
         string conversaId,
         IdentidadeDeBanco contextoDeBanco,
         string mensagemDoUsuario,
-        Modelos.RespostaDeConsultaDoAssistente respostaDoAssistente)
+        Modelos.RespostaDeConsultaDoAssistente respostaDoAssistente,
+        string? provedorDeIaSelecionado = null)
     {
         var conversa = await ObterConversaInternaAsync(conversaId);
         if (conversa is null)
         {
             throw new InvalidOperationException($"Conversa '{conversaId}' não encontrada.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(provedorDeIaSelecionado))
+        {
+            conversa.ProvedorDeIaSelecionado = provedorDeIaSelecionado;
         }
 
         var agora = DateTime.UtcNow.ToString("o");
@@ -377,6 +384,7 @@ public sealed class ServicoDeConversas
             CriadaEm = conversa.CriadaEm,
             AtualizadaEm = conversa.AtualizadaEm,
             ContextoDeBanco = conversa.ContextoDeBanco,
+            ProvedorDeIa = conversa.ProvedorDeIaSelecionado,
             Mensagens = conversa.Mensagens
         };
     }
