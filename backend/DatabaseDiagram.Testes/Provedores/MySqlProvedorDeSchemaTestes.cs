@@ -163,6 +163,7 @@ public class MySqlProvedorDeSchemaTestes
     [InlineData(MySqlProvedorDeSchema.ConsultaDeColunas)]
     [InlineData(MySqlProvedorDeSchema.ConsultaDeChavesPrimarias)]
     [InlineData(MySqlProvedorDeSchema.ConsultaDeChavesEstrangeiras)]
+    [InlineData(MySqlProvedorDeSchema.ConsultaDeTabelasPorNome)]
     public void Consultas_SaoDeLeituraDeMetadados(string consulta)
     {
         Assert.Matches(@"^\s*SELECT\b", consulta);
@@ -194,6 +195,13 @@ public class MySqlProvedorDeSchemaTestes
     public void ConsultaDeTabelas_OrdenaPorQuantidadeDeRegistrosDecrescente()
     {
         Assert.Contains("ORDER BY TABLE_ROWS DESC", MySqlProvedorDeSchema.ConsultaDeTabelas);
+    }
+
+    [Fact]
+    public void ConsultaDeTabelasPorNome_NaoFiltraPorQuantidadeDeRegistros()
+    {
+        Assert.DoesNotContain("TABLE_ROWS", MySqlProvedorDeSchema.ConsultaDeTabelasPorNome);
+        Assert.Contains("TABLE_NAME IN ({0})", MySqlProvedorDeSchema.ConsultaDeTabelasPorNome);
     }
 
     [Theory]

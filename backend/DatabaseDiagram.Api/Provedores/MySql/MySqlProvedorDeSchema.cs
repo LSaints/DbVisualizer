@@ -102,6 +102,22 @@ public sealed class MySqlProvedorDeSchema : InterfaceProvedorDeSchema
         ORDER BY kcu.ORDINAL_POSITION
         """;
 
+    /// <summary>
+    /// Busca tabelas por nome, SEM o filtro de <c>TABLE_ROWS</c>. Usada para
+    /// trazer de volta tabelas referenciadas por chave estrangeira que
+    /// ficaram fora do corte de relevância (<see cref="ConsultaDeTabelas"/>),
+    /// evitando relacionamentos "pendurados" (sem uma das pontas) no
+    /// diagrama — o critério de relevância nunca deve esconder uma tabela
+    /// que é destino de uma FK de uma tabela já selecionada.
+    /// </summary>
+    internal const string ConsultaDeTabelasPorNome = """
+        SELECT TABLE_NAME, TABLE_TYPE, ENGINE, TABLE_COMMENT
+        FROM information_schema.TABLES
+        WHERE TABLE_SCHEMA = @bancoDeDados
+          AND TABLE_TYPE = 'BASE TABLE'
+          AND TABLE_NAME IN ({0})
+        """;
+
     public async Task<EsquemaDeBanco> ObterEsquemaAsync(
         ConexaoDeBanco conexao,
         CancellationToken cancellationToken)
@@ -141,6 +157,36 @@ public sealed class MySqlProvedorDeSchema : InterfaceProvedorDeSchema
 
             relacionamentos.AddRange(await ObterRelacionamentosDeTabelaAsync(
                 conexaoSql, nomeDoBanco, tabela.Nome, cancellationToken));
+        }
+
+        // TABLE_ROWS pode excluir uma tabela pequena que é destino de FK de
+        // uma tabela relevante (ex.: tabela de lookup/enum). Sem isso, o
+        // relacionamento fica "pendurado" e o frontend não desenha a aresta
+        // por faltar um dos nós — ver LayoutDoDiagrama.
+        var nomesConhecidos = tabelas.Select(t => t.Nome).ToHashSet(StringComparer.Ordinal);
+        var nomesFaltantes = relacionamentos
+            .Where(r => string.Equals(r.EsquemaDestino, nomeDoBanco, StringComparison.Ordinal))
+            .Select(r => r.TabelaDestino)
+            .Where(nome => !nomesConhecidos.Contains(nome))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
+        if (nomesFaltantes.Count > 0)
+        {
+            var tabelasFaltantes = await ObterTabelasPorNomeAsync(
+                conexaoSql, nomeDoBanco, nomesFaltantes, cancellationToken);
+            tabelas = [.. tabelas, .. tabelasFaltantes];
+
+            foreach (var tabela in tabelasFaltantes)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                colunasPorTabela[tabela.Nome] = await ObterColunasDeTabelaAsync(
+                    conexaoSql, nomeDoBanco, tabela.Nome, cancellationToken);
+
+                chavesPrimarias.AddRange(await ObterChavesPrimariasDeTabelaAsync(
+                    conexaoSql, nomeDoBanco, tabela.Nome, cancellationToken));
+            }
         }
 
         var esquema = MontarEsquema(
@@ -202,6 +248,45 @@ public sealed class MySqlProvedorDeSchema : InterfaceProvedorDeSchema
         var tabelas = new List<TabelaDeBanco>();
 
         await using var comando = CriarComando(conexaoSql, ConsultaDeTabelas, bancoDeDados);
+        await using var leitor = await comando.ExecuteReaderAsync(cancellationToken);
+
+        while (await leitor.ReadAsync(cancellationToken))
+        {
+            tabelas.Add(new TabelaDeBanco
+            {
+                Esquema = bancoDeDados,
+                Nome = leitor.GetString(0),
+                TipoDaTabela = ObterStringOpcional(leitor, 1),
+                Motor = ObterStringOpcional(leitor, 2),
+                Comentario = ObterStringOpcional(leitor, 3)
+            });
+        }
+
+        return tabelas;
+    }
+
+    private static async Task<List<TabelaDeBanco>> ObterTabelasPorNomeAsync(
+        MySqlConnection conexaoSql,
+        string bancoDeDados,
+        IReadOnlyList<string> nomesDeTabelas,
+        CancellationToken cancellationToken)
+    {
+        var tabelas = new List<TabelaDeBanco>();
+
+        var marcadores = string.Join(", ", nomesDeTabelas.Select((_, i) => $"@tabela{i}"));
+        var consulta = string.Format(ConsultaDeTabelasPorNome, marcadores);
+
+        await using var comando = new MySqlCommand(consulta, conexaoSql)
+        {
+            CommandType = CommandType.Text,
+            CommandTimeout = TimeoutDoComandoEmSegundos
+        };
+        comando.Parameters.AddWithValue("@bancoDeDados", bancoDeDados);
+        for (var i = 0; i < nomesDeTabelas.Count; i++)
+        {
+            comando.Parameters.AddWithValue($"@tabela{i}", nomesDeTabelas[i]);
+        }
+
         await using var leitor = await comando.ExecuteReaderAsync(cancellationToken);
 
         while (await leitor.ReadAsync(cancellationToken))
