@@ -34,8 +34,30 @@ public sealed class ServicoDeSchema
         _tempoMaximoDeEspera = tempoMaximoDeEspera;
     }
 
-    public async Task<EsquemaDeBanco> ObterAsync(
+    public Task<EsquemaDeBanco> ObterAsync(
         ConexaoDeBanco conexao,
+        CancellationToken cancellationToken) =>
+        ComGateDeConcorrenciaAsync(
+            conexao,
+            provedor => provedor.ObterEsquemaAsync(conexao, cancellationToken),
+            cancellationToken);
+
+    public Task<PaginaDeTabelas> ObterMaisTabelasAsync(
+        ConexaoDeBanco conexao,
+        IReadOnlyList<string> tabelasCarregadas,
+        CancellationToken cancellationToken) =>
+        ComGateDeConcorrenciaAsync(
+            conexao,
+            provedor => provedor.ObterMaisTabelasAsync(conexao, tabelasCarregadas, cancellationToken),
+            cancellationToken);
+
+    /// <summary>
+    /// Resolve o provider e executa <paramref name="chamada"/> sob o limite
+    /// de concorrência, liberando a vaga ao final (sucesso ou falha).
+    /// </summary>
+    private async Task<T> ComGateDeConcorrenciaAsync<T>(
+        ConexaoDeBanco conexao,
+        Func<InterfaceProvedorDeSchema, Task<T>> chamada,
         CancellationToken cancellationToken)
     {
         var provedor = _fabrica.ObterProvedor(conexao.Provedor)
@@ -49,7 +71,7 @@ public sealed class ServicoDeSchema
 
         try
         {
-            return await provedor.ObterEsquemaAsync(conexao, cancellationToken);
+            return await chamada(provedor);
         }
         finally
         {

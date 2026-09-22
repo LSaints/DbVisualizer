@@ -64,6 +64,13 @@ export interface RelacionamentoDeBanco {
   regraDeExclusao?: string | null;
 }
 
+/** Resposta de POST /api/esquema/mais-tabelas ("carregar mais"). */
+export interface PaginaDeTabelas {
+  tabelas: TabelaDeBanco[];
+  relacionamentos: RelacionamentoDeBanco[];
+  temMaisTabelas: boolean;
+}
+
 /** Resposta de POST /api/conexoes/teste. */
 export interface RespostaTesteConexao {
   sucesso: boolean;

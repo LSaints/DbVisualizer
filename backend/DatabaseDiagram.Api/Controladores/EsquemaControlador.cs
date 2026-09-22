@@ -71,4 +71,56 @@ public sealed class EsquemaControlador(
                 new { mensagem = "Não foi possível carregar o schema." });
         }
     }
+
+    /// <summary>
+    /// <c>POST /api/esquema/mais-tabelas</c> ("carregar mais"). Sucesso:
+    /// <c>200</c> com <see cref="DatabaseDiagram.Api.Modelos.PaginaDeTabelas"/>.
+    /// Erro de conexão/introspecção: <c>502</c> com <c>{"mensagem":"..."}</c>.
+    /// </summary>
+    [HttpPost("mais-tabelas")]
+    public async Task<IActionResult> ObterMaisTabelas(
+        RequisicaoConexao requisicao,
+        CancellationToken cancellationToken)
+    {
+        if (!ModelState.IsValid)
+        {
+            return BadRequest(new { mensagem = MensagensDeValidacao.PrimeiraMensagem(ModelState) });
+        }
+
+        if (!fabricaDeProvedores.Suporta(requisicao.Provedor))
+        {
+            return BadRequest(new { mensagem = "Provedor de banco não suportado." });
+        }
+
+        try
+        {
+            var pagina = await servicoDeSchema.ObterMaisTabelasAsync(
+                requisicao.ParaConexaoDeBanco(),
+                requisicao.TabelasCarregadas ?? [],
+                cancellationToken);
+
+            return Ok(pagina);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (IntrospeccaoOcupadaException excecao)
+        {
+            return StatusCode(
+                StatusCodes.Status429TooManyRequests,
+                new { mensagem = excecao.Message });
+        }
+        catch (Exception excecao)
+        {
+            logger.LogError(
+                excecao,
+                "Falha ao carregar mais tabelas do banco de dados '{BancoDeDados}'.",
+                requisicao.BancoDeDados);
+
+            return StatusCode(
+                StatusCodes.Status502BadGateway,
+                new { mensagem = "Não foi possível carregar mais tabelas." });
+        }
+    }
 }

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import ReactFlow, {
   Background,
   Controls,
@@ -9,7 +9,7 @@ import ReactFlow, {
 } from 'reactflow';
 import { BarraDePesquisa } from '../componentes/BarraDePesquisa';
 import { TabelaNoDiagrama, type NodoDeTabela } from '../componentes/TabelaNoDiagrama';
-import type { EsquemaDeBanco } from '../modelos/tipos';
+import type { EsquemaDeBanco, TabelaDeBanco } from '../modelos/tipos';
 import { idDeRelacionamento, idDeTabela, idDeTabelaPorChaves } from '../modelos/tipos';
 import { filtrarRelacionamentosDiretos } from '../servicos/FiltroDeRelacionamentos';
 import { aplicarLayout, type Posicao } from '../servicos/LayoutDoDiagrama';
@@ -21,6 +21,9 @@ const tiposDeNodos: Record<string, (props: unknown) => JSX.Element> = {
 interface Propriedades {
   esquema: EsquemaDeBanco;
   aoDesconectar: () => void;
+  temMaisTabelas: boolean;
+  carregandoMaisTabelas: boolean;
+  aoCarregarMaisTabelas: () => void;
 }
 
 /**
@@ -28,7 +31,13 @@ interface Propriedades {
  * React Flow, e oferece navegação (zoom/pan/arrastar), busca, layout
  * automático, ocultação/restauração e foco em relacionamentos diretos.
  */
-export function PaginaDoDiagrama({ esquema, aoDesconectar }: Propriedades) {
+export function PaginaDoDiagrama({
+  esquema,
+  aoDesconectar,
+  temMaisTabelas,
+  carregandoMaisTabelas,
+  aoCarregarMaisTabelas
+}: Propriedades) {
   const [posicoes, setPosicoes] = useState<Record<string, Posicao>>(() =>
     aplicarLayout(esquema.tabelas, esquema.relacionamentos)
   );
@@ -37,14 +46,42 @@ export function PaginaDoDiagrama({ esquema, aoDesconectar }: Propriedades) {
   const [filtroDeEsquema, setFiltroDeEsquema] = useState('todos');
   const [tabelaSelecionada, setTabelaSelecionada] = useState<string | null>(null);
   const [foco, setFoco] = useState<string | null>(null);
+  const tabelasAnterioresRef = useRef<TabelaDeBanco[]>([]);
 
   useEffect(() => {
-    setPosicoes(aplicarLayout(esquema.tabelas, esquema.relacionamentos));
-    setTabelasOcultas(new Set());
-    setBusca('');
-    setFiltroDeEsquema('todos');
-    setTabelaSelecionada(null);
-    setFoco(null);
+    const anteriores = tabelasAnterioresRef.current;
+    // "Carregar mais tabelas" acrescenta ao mesmo schema (todas as tabelas
+    // antigas continuam presentes) — nesse caso só as novas ganham posição,
+    // preservando o arranjo que o usuário já ajustou. Qualquer outra mudança
+    // (nova conexão) é tratada como diagrama novo, com reset completo.
+    const éContinuacao =
+      anteriores.length > 0 &&
+      anteriores.every((tabelaAnterior) =>
+        esquema.tabelas.some(
+          (tabelaAtual) => idDeTabela(tabelaAtual) === idDeTabela(tabelaAnterior)
+        )
+      );
+
+    if (éContinuacao) {
+      const idsAnteriores = new Set(anteriores.map(idDeTabela));
+      const tabelasNovas = esquema.tabelas.filter(
+        (tabela) => !idsAnteriores.has(idDeTabela(tabela))
+      );
+
+      if (tabelasNovas.length > 0) {
+        const layoutDasNovas = aplicarLayout(tabelasNovas, esquema.relacionamentos);
+        setPosicoes((anterior) => ({ ...anterior, ...layoutDasNovas }));
+      }
+    } else {
+      setPosicoes(aplicarLayout(esquema.tabelas, esquema.relacionamentos));
+      setTabelasOcultas(new Set());
+      setBusca('');
+      setFiltroDeEsquema('todos');
+      setTabelaSelecionada(null);
+      setFoco(null);
+    }
+
+    tabelasAnterioresRef.current = esquema.tabelas;
   }, [esquema]);
 
   const esquemasDisponiveis = useMemo(() => {
@@ -266,6 +303,16 @@ export function PaginaDoDiagrama({ esquema, aoDesconectar }: Propriedades) {
           <button className="botao-primario" onClick={organizarAutomaticamente}>
             Organizar automaticamente
           </button>
+
+          {temMaisTabelas && (
+            <button
+              className="botao-secundario"
+              onClick={aoCarregarMaisTabelas}
+              disabled={carregandoMaisTabelas}
+            >
+              {carregandoMaisTabelas ? 'Carregando…' : 'Carregar mais tabelas'}
+            </button>
+          )}
         </div>
       </header>
 

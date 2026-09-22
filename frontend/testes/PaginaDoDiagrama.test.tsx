@@ -1,6 +1,6 @@
 import { act, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { EsquemaDeBanco } from '../src/modelos/tipos';
 import { PaginaDoDiagrama } from '../src/paginas/PaginaDoDiagrama';
 
@@ -61,11 +61,18 @@ const esquema: EsquemaDeBanco = {
   ]
 };
 
-function renderizaPagina(): void {
+function renderizaPagina(propriedades?: {
+  temMaisTabelas?: boolean;
+  carregandoMaisTabelas?: boolean;
+  aoCarregarMaisTabelas?: () => void;
+}): void {
   render(
     <PaginaDoDiagrama
       esquema={esquema}
       aoDesconectar={() => undefined}
+      temMaisTabelas={propriedades?.temMaisTabelas ?? false}
+      carregandoMaisTabelas={propriedades?.carregandoMaisTabelas ?? false}
+      aoCarregarMaisTabelas={propriedades?.aoCarregarMaisTabelas ?? (() => undefined)}
     />
   );
 }
@@ -175,5 +182,26 @@ describe('PaginaDoDiagrama (cenários 4-8 do quickstart)', () => {
     expect(screen.getByText('pedidos').closest('.react-flow__node')).not.toHaveClass(
       'tabela--selecionada'
     );
+  });
+
+  it('cenário 10: botão "carregar mais tabelas" só aparece quando há mais, e aciona o callback', async () => {
+    renderizaPagina({ temMaisTabelas: false });
+    expect(screen.queryByRole('button', { name: 'Carregar mais tabelas' })).not.toBeInTheDocument();
+
+    const aoCarregarMaisTabelas = vi.fn();
+    render(
+      <PaginaDoDiagrama
+        esquema={esquema}
+        aoDesconectar={() => undefined}
+        temMaisTabelas
+        carregandoMaisTabelas={false}
+        aoCarregarMaisTabelas={aoCarregarMaisTabelas}
+      />
+    );
+
+    const botao = screen.getByRole('button', { name: 'Carregar mais tabelas' });
+    await userEvent.click(botao);
+
+    expect(aoCarregarMaisTabelas).toHaveBeenCalledTimes(1);
   });
 });

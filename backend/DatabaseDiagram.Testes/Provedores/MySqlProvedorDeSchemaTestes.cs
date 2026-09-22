@@ -164,6 +164,7 @@ public class MySqlProvedorDeSchemaTestes
     [InlineData(MySqlProvedorDeSchema.ConsultaDeChavesPrimarias)]
     [InlineData(MySqlProvedorDeSchema.ConsultaDeChavesEstrangeiras)]
     [InlineData(MySqlProvedorDeSchema.ConsultaDeTabelasPorNome)]
+    [InlineData(MySqlProvedorDeSchema.ConsultaDeProximasTabelas)]
     public void Consultas_SaoDeLeituraDeMetadados(string consulta)
     {
         Assert.Matches(@"^\s*SELECT\b", consulta);
@@ -202,6 +203,22 @@ public class MySqlProvedorDeSchemaTestes
     {
         Assert.DoesNotContain("TABLE_ROWS", MySqlProvedorDeSchema.ConsultaDeTabelasPorNome);
         Assert.Contains("TABLE_NAME IN ({0})", MySqlProvedorDeSchema.ConsultaDeTabelasPorNome);
+    }
+
+    [Fact]
+    public void ConsultaDeProximasTabelas_NaoFiltraPorQuantidadeDeRegistrosENemLimiteInicial()
+    {
+        Assert.DoesNotContain("TABLE_ROWS >", MySqlProvedorDeSchema.ConsultaDeProximasTabelas);
+        Assert.Contains("ORDER BY TABLE_ROWS DESC", MySqlProvedorDeSchema.ConsultaDeProximasTabelas);
+        Assert.Contains("LIMIT 51", MySqlProvedorDeSchema.ConsultaDeProximasTabelas);
+    }
+
+    [Fact]
+    public void LimiteDeConsultaDoLote_CondizComOTamanhoDoLote()
+    {
+        Assert.Equal(
+            MySqlProvedorDeSchema.TamanhoDoLoteAdicional + 1,
+            MySqlProvedorDeSchema.LimiteDeConsultaDoLote);
     }
 
     [Theory]

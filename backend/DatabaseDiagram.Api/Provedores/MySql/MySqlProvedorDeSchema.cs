@@ -23,6 +23,16 @@ public sealed class MySqlProvedorDeSchema : InterfaceProvedorDeSchema
     /// </summary>
     internal const int LimiteDeConsultaDeTabelas = LimiteDeTabelasParaIntrospeccao + 1;
 
+    /// <summary>Quantidade de tabelas retornada por chamada de "carregar mais".</summary>
+    internal const int TamanhoDoLoteAdicional = 50;
+
+    /// <summary>
+    /// Uma linha a mais que o lote: detecta se há mais tabelas sem consulta
+    /// extra. Mantenha em sincronia com o <c>LIMIT</c> da
+    /// <see cref="ConsultaDeProximasTabelas"/>.
+    /// </summary>
+    internal const int LimiteDeConsultaDoLote = TamanhoDoLoteAdicional + 1;
+
     /// <summary>Timeout de cada comando para não segurar conexão/thread indefinidamente.</summary>
     private const int TimeoutDoComandoEmSegundos = 30;
 
@@ -118,6 +128,25 @@ public sealed class MySqlProvedorDeSchema : InterfaceProvedorDeSchema
           AND TABLE_NAME IN ({0})
         """;
 
+    /// <summary>
+    /// Busca o próximo lote de tabelas para "carregar mais", excluindo as já
+    /// conhecidas pelo cliente. Deliberadamente SEM o filtro
+    /// <c>TABLE_ROWS &gt; 10</c> de <see cref="ConsultaDeTabelas"/>: o lote
+    /// adicional é exatamente onde as tabelas de baixa relevância (e as que
+    /// ficaram além do limite de 500) aparecem, ordenadas pela mesma
+    /// estimativa de registros. <c>{0}</c> é substituído por uma cláusula de
+    /// exclusão por nome (ou string vazia quando não há tabelas carregadas).
+    /// </summary>
+    internal const string ConsultaDeProximasTabelas = """
+        SELECT TABLE_NAME, TABLE_TYPE, ENGINE, TABLE_COMMENT
+        FROM information_schema.TABLES
+        WHERE TABLE_SCHEMA = @bancoDeDados
+          AND TABLE_TYPE = 'BASE TABLE'
+          {0}
+        ORDER BY TABLE_ROWS DESC
+        LIMIT 51
+        """;
+
     public async Task<EsquemaDeBanco> ObterEsquemaAsync(
         ConexaoDeBanco conexao,
         CancellationToken cancellationToken)
@@ -208,6 +237,54 @@ public sealed class MySqlProvedorDeSchema : InterfaceProvedorDeSchema
         return esquema;
     }
 
+    public async Task<PaginaDeTabelas> ObterMaisTabelasAsync(
+        ConexaoDeBanco conexao,
+        IReadOnlyList<string> tabelasCarregadas,
+        CancellationToken cancellationToken)
+    {
+        var stringDeConexao = _configurador.CriarStringDeConexao(conexao);
+        await using var conexaoSql = new MySqlConnection(stringDeConexao);
+        await conexaoSql.OpenAsync(cancellationToken);
+
+        var nomeDoBanco = conexao.BancoDeDados;
+
+        var tabelas = await ObterProximasTabelasAsync(
+            conexaoSql, nomeDoBanco, tabelasCarregadas, cancellationToken);
+
+        var temMaisTabelas = tabelas.Count >= LimiteDeConsultaDoLote;
+        if (temMaisTabelas)
+        {
+            tabelas = tabelas.Take(TamanhoDoLoteAdicional).ToList();
+        }
+
+        var colunasPorTabela = new Dictionary<string, IReadOnlyList<ColunaDeBanco>>();
+        var chavesPrimarias = new List<(string Esquema, string Tabela, string Coluna)>();
+        var relacionamentos = new List<RelacionamentoDeBanco>();
+
+        foreach (var tabela in tabelas)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            colunasPorTabela[tabela.Nome] = await ObterColunasDeTabelaAsync(
+                conexaoSql, nomeDoBanco, tabela.Nome, cancellationToken);
+
+            chavesPrimarias.AddRange(await ObterChavesPrimariasDeTabelaAsync(
+                conexaoSql, nomeDoBanco, tabela.Nome, cancellationToken));
+
+            relacionamentos.AddRange(await ObterRelacionamentosDeTabelaAsync(
+                conexaoSql, nomeDoBanco, tabela.Nome, cancellationToken));
+        }
+
+        AnexarColunasATabelas(tabelas, colunasPorTabela, chavesPrimarias, relacionamentos);
+
+        return new PaginaDeTabelas
+        {
+            Tabelas = tabelas,
+            Relacionamentos = relacionamentos,
+            TemMaisTabelas = temMaisTabelas
+        };
+    }
+
     private static async Task<(string? Charset, string? Collation)> ObterBancoAsync(
         MySqlConnection conexaoSql,
         string bancoDeDados,
@@ -285,6 +362,49 @@ public sealed class MySqlProvedorDeSchema : InterfaceProvedorDeSchema
         for (var i = 0; i < nomesDeTabelas.Count; i++)
         {
             comando.Parameters.AddWithValue($"@tabela{i}", nomesDeTabelas[i]);
+        }
+
+        await using var leitor = await comando.ExecuteReaderAsync(cancellationToken);
+
+        while (await leitor.ReadAsync(cancellationToken))
+        {
+            tabelas.Add(new TabelaDeBanco
+            {
+                Esquema = bancoDeDados,
+                Nome = leitor.GetString(0),
+                TipoDaTabela = ObterStringOpcional(leitor, 1),
+                Motor = ObterStringOpcional(leitor, 2),
+                Comentario = ObterStringOpcional(leitor, 3)
+            });
+        }
+
+        return tabelas;
+    }
+
+    private static async Task<List<TabelaDeBanco>> ObterProximasTabelasAsync(
+        MySqlConnection conexaoSql,
+        string bancoDeDados,
+        IReadOnlyList<string> tabelasExcluidas,
+        CancellationToken cancellationToken)
+    {
+        var tabelas = new List<TabelaDeBanco>();
+
+        var clausulaDeExclusao = tabelasExcluidas.Count > 0
+            ? "AND TABLE_NAME NOT IN ("
+                + string.Join(", ", tabelasExcluidas.Select((_, i) => $"@excluida{i}"))
+                + ")"
+            : string.Empty;
+        var consulta = string.Format(ConsultaDeProximasTabelas, clausulaDeExclusao);
+
+        await using var comando = new MySqlCommand(consulta, conexaoSql)
+        {
+            CommandType = CommandType.Text,
+            CommandTimeout = TimeoutDoComandoEmSegundos
+        };
+        comando.Parameters.AddWithValue("@bancoDeDados", bancoDeDados);
+        for (var i = 0; i < tabelasExcluidas.Count; i++)
+        {
+            comando.Parameters.AddWithValue($"@excluida{i}", tabelasExcluidas[i]);
         }
 
         await using var leitor = await comando.ExecuteReaderAsync(cancellationToken);
@@ -431,6 +551,31 @@ public sealed class MySqlProvedorDeSchema : InterfaceProvedorDeSchema
         IReadOnlyCollection<RelacionamentoDeBanco> relacionamentos,
         string? versao = null)
     {
+        AnexarColunasATabelas(tabelas, colunasPorTabela, chavesPrimarias, relacionamentos);
+
+        return new EsquemaDeBanco
+        {
+            Provedor = provedor,
+            NomeDoBanco = nomeDoBanco,
+            Versao = versao,
+            Charset = charset,
+            Collation = collation,
+            Tabelas = [.. tabelas],
+            Relacionamentos = [.. relacionamentos]
+        };
+    }
+
+    /// <summary>
+    /// Preenche <see cref="TabelaDeBanco.Colunas"/> com as flags de PK/FK,
+    /// compartilhado entre <see cref="MontarEsquema"/> (schema completo) e
+    /// <see cref="ObterMaisTabelasAsync"/> (lote adicional).
+    /// </summary>
+    private static void AnexarColunasATabelas(
+        IReadOnlyCollection<TabelaDeBanco> tabelas,
+        IReadOnlyDictionary<string, IReadOnlyList<ColunaDeBanco>> colunasPorTabela,
+        IReadOnlyCollection<(string Esquema, string Tabela, string Coluna)> chavesPrimarias,
+        IReadOnlyCollection<RelacionamentoDeBanco> relacionamentos)
+    {
         var colunasPk = chavesPrimarias
             .Select(c => ChaveDaColuna(c.Esquema, c.Tabela, c.Coluna))
             .ToHashSet(StringComparer.Ordinal);
@@ -461,17 +606,6 @@ public sealed class MySqlProvedorDeSchema : InterfaceProvedorDeSchema
 
             tabela.Colunas.AddRange(colunas.OrderBy(c => c.PosicaoOrdinal));
         }
-
-        return new EsquemaDeBanco
-        {
-            Provedor = provedor,
-            NomeDoBanco = nomeDoBanco,
-            Versao = versao,
-            Charset = charset,
-            Collation = collation,
-            Tabelas = [.. tabelas],
-            Relacionamentos = [.. relacionamentos]
-        };
     }
 
     internal static string ChaveDaTabela(string esquema, string nome) => $"{esquema}.{nome}";

@@ -3,13 +3,18 @@ import { FormularioDeConexao } from './componentes/FormularioDeConexao';
 import type { ConexaoDeBanco, EsquemaDeBanco } from './modelos/tipos';
 import { PaginaDoAssistente } from './paginas/PaginaDoAssistente';
 import { PaginaDoDiagrama } from './paginas/PaginaDoDiagrama';
-import { obterEsquema, testarConexao } from './servicos/ApiDiagrama';
+import { obterEsquema, obterMaisTabelas, testarConexao } from './servicos/ApiDiagrama';
 
 type EstadoDaAplicacao =
   | { tipo: 'desconectado' }
   | { tipo: 'conectando'; conexao: ConexaoDeBanco }
   | { tipo: 'carregandoSchema'; conexao: ConexaoDeBanco }
-  | { tipo: 'sucesso'; conexao: ConexaoDeBanco; esquema: EsquemaDeBanco }
+  | {
+      tipo: 'sucesso';
+      conexao: ConexaoDeBanco;
+      esquema: EsquemaDeBanco;
+      temMaisTabelas: boolean;
+    }
   | { tipo: 'erro'; conexao: ConexaoDeBanco; mensagem: string };
 
 type Tela = 'diagrama' | 'assistente';
@@ -22,6 +27,7 @@ type Tela = 'diagrama' | 'assistente';
 export function App() {
   const [estado, setEstado] = useState<EstadoDaAplicacao>({ tipo: 'desconectado' });
   const [tela, setTela] = useState<Tela>('diagrama');
+  const [carregandoMaisTabelas, setCarregandoMaisTabelas] = useState(false);
 
   async function conectar(conexao: ConexaoDeBanco): Promise<void> {
     setEstado({ tipo: 'conectando', conexao });
@@ -41,7 +47,7 @@ export function App() {
       setEstado({ tipo: 'carregandoSchema', conexao });
 
       const esquema = await obterEsquema(conexao);
-      setEstado({ tipo: 'sucesso', conexao, esquema });
+      setEstado({ tipo: 'sucesso', conexao, esquema, temMaisTabelas: true });
     } catch (falha) {
       setEstado({
         tipo: 'erro',
@@ -51,6 +57,40 @@ export function App() {
             ? falha.message
             : 'Não foi possível carregar o schema.'
       });
+    }
+  }
+
+  async function carregarMaisTabelas(): Promise<void> {
+    if (estado.tipo !== 'sucesso' || carregandoMaisTabelas) {
+      return;
+    }
+
+    setCarregandoMaisTabelas(true);
+
+    try {
+      const nomesCarregados = estado.esquema.tabelas.map((tabela) => tabela.nome);
+      const pagina = await obterMaisTabelas(estado.conexao, nomesCarregados);
+
+      setEstado((anterior) => {
+        if (anterior.tipo !== 'sucesso') {
+          return anterior;
+        }
+
+        return {
+          ...anterior,
+          esquema: {
+            ...anterior.esquema,
+            tabelas: [...anterior.esquema.tabelas, ...pagina.tabelas],
+            relacionamentos: [...anterior.esquema.relacionamentos, ...pagina.relacionamentos]
+          },
+          temMaisTabelas: pagina.temMaisTabelas
+        };
+      });
+    } catch {
+      // Falha ao carregar mais tabelas não invalida o diagrama já carregado;
+      // o usuário pode tentar novamente clicando no botão outra vez.
+    } finally {
+      setCarregandoMaisTabelas(false);
     }
   }
 
@@ -108,6 +148,9 @@ export function App() {
           <PaginaDoDiagrama
             esquema={estado.esquema}
             aoDesconectar={desconectar}
+            temMaisTabelas={estado.temMaisTabelas}
+            carregandoMaisTabelas={carregandoMaisTabelas}
+            aoCarregarMaisTabelas={carregarMaisTabelas}
           />
         ) : (
           <div className="tela-de-conexao">

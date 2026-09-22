@@ -117,6 +117,12 @@ public class ServicoDeSchemaTestes
             ConexaoDeBanco conexao,
             CancellationToken cancellationToken) =>
             Task.FromResult(_esquema);
+
+        public Task<PaginaDeTabelas> ObterMaisTabelasAsync(
+            ConexaoDeBanco conexao,
+            IReadOnlyList<string> tabelasCarregadas,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(new PaginaDeTabelas());
     }
 
     private sealed class ProvedorControlavel : InterfaceProvedorDeSchema
@@ -136,5 +142,11 @@ public class ServicoDeSchemaTestes
             await Liberar.Task.WaitAsync(cancellationToken);
             return new EsquemaDeBanco { Provedor = "mysql", NomeDoBanco = "erp" };
         }
+
+        public Task<PaginaDeTabelas> ObterMaisTabelasAsync(
+            ConexaoDeBanco conexao,
+            IReadOnlyList<string> tabelasCarregadas,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(new PaginaDeTabelas());
     }
 }

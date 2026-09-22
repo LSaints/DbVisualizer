@@ -31,6 +31,13 @@ public sealed class RequisicaoConexao
     public string? Senha { get; set; }
 
     /// <summary>
+    /// Nomes das tabelas já carregadas pelo cliente. Usado somente por
+    /// <c>POST /api/esquema/mais-tabelas</c> para excluí-las do próximo lote;
+    /// ignorado por <c>POST /api/esquema</c>.
+    /// </summary>
+    public List<string>? TabelasCarregadas { get; set; }
+
+    /// <summary>
     /// Converte para o modelo de domínio <see cref="ConexaoDeBanco"/>.
     /// Usa a porta padrão do provider (3306) quando ela não foi informada.
     /// </summary>

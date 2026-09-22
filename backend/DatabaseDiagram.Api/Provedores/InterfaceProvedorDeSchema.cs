@@ -12,4 +12,14 @@ public interface InterfaceProvedorDeSchema
     string Tipo { get; }
 
     Task<EsquemaDeBanco> ObterEsquemaAsync(ConexaoDeBanco conexao, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Busca um lote adicional de tabelas ("carregar mais"), excluindo as já
+    /// conhecidas pelo cliente (<paramref name="tabelasCarregadas"/>), com os
+    /// relacionamentos que partem delas.
+    /// </summary>
+    Task<PaginaDeTabelas> ObterMaisTabelasAsync(
+        ConexaoDeBanco conexao,
+        IReadOnlyList<string> tabelasCarregadas,
+        CancellationToken cancellationToken);
 }
