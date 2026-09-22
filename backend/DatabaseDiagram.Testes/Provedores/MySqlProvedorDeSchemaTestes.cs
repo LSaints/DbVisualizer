@@ -185,6 +185,28 @@ public class MySqlProvedorDeSchemaTestes
     }
 
     [Fact]
+    public void ConsultaDeTabelas_FiltraPorQuantidadeDeRegistros()
+    {
+        Assert.Contains("TABLE_ROWS > 10", MySqlProvedorDeSchema.ConsultaDeTabelas);
+    }
+
+    [Fact]
+    public void ConsultaDeTabelas_OrdenaPorQuantidadeDeRegistrosDecrescente()
+    {
+        Assert.Contains("ORDER BY TABLE_ROWS DESC", MySqlProvedorDeSchema.ConsultaDeTabelas);
+    }
+
+    [Theory]
+    [InlineData(MySqlProvedorDeSchema.ConsultaDeTabelas)]
+    [InlineData(MySqlProvedorDeSchema.ConsultaDeColunas)]
+    [InlineData(MySqlProvedorDeSchema.ConsultaDeChavesPrimarias)]
+    [InlineData(MySqlProvedorDeSchema.ConsultaDeChavesEstrangeiras)]
+    public void Consultas_NaoExecutamContagemPorTabela(string consulta)
+    {
+        Assert.DoesNotContain("COUNT(", consulta.ToUpperInvariant());
+    }
+
+    [Fact]
     public void ConsultaDeColunas_FiltraPorTabela()
     {
         Assert.Contains("AND TABLE_NAME = @tabela", MySqlProvedorDeSchema.ConsultaDeColunas);
@@ -209,7 +231,7 @@ public class MySqlProvedorDeSchemaTestes
         var aviso = MySqlProvedorDeSchema.CriarAvisoDeTruncamento();
 
         Assert.Contains("500", aviso);
-        Assert.Contains("ordem alfabética", aviso);
+        Assert.Contains("quantidade estimada de registros", aviso);
     }
 
     [Fact]

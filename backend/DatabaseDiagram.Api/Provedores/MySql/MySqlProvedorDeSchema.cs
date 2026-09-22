@@ -42,12 +42,21 @@ public sealed class MySqlProvedorDeSchema : InterfaceProvedorDeSchema
         SELECT VERSION()
         """;
 
+    /// <summary>
+    /// Filtra e ordena tabelas por <c>TABLE_ROWS</c>, a quantidade de registros
+    /// estimada pelo MySQL nas estatísticas do <c>information_schema</c>.
+    /// Para tabelas InnoDB esse valor é uma ESTIMATIVA (não um <c>COUNT(*)</c>
+    /// exato) e não deve ser interpretado como contagem precisa de linhas.
+    /// Usado somente para decidir relevância/prioridade das tabelas
+    /// introspeccionadas; não é armazenado no modelo de tabela retornado.
+    /// </summary>
     internal const string ConsultaDeTabelas = """
         SELECT TABLE_NAME, TABLE_TYPE, ENGINE, TABLE_COMMENT
         FROM information_schema.TABLES
         WHERE TABLE_SCHEMA = @bancoDeDados
           AND TABLE_TYPE = 'BASE TABLE'
-        ORDER BY TABLE_NAME
+          AND TABLE_ROWS > 10
+        ORDER BY TABLE_ROWS DESC
         LIMIT 501
         """;
 
@@ -313,8 +322,9 @@ public sealed class MySqlProvedorDeSchema : InterfaceProvedorDeSchema
 
     /// <summary>Aviso quando o banco excede o limite de tabelas introspeccionadas.</summary>
     internal static string CriarAvisoDeTruncamento() =>
-        $"O banco possui mais de {LimiteDeTabelasParaIntrospeccao} tabelas; "
-        + $"o diagrama mostra apenas as {LimiteDeTabelasParaIntrospeccao} primeiras, em ordem alfabética.";
+        $"O banco possui mais de {LimiteDeTabelasParaIntrospeccao} tabelas relevantes; "
+        + $"o diagrama mostra apenas as {LimiteDeTabelasParaIntrospeccao} com maior "
+        + "quantidade estimada de registros.";
 
     /// <summary>Lê uma coluna string opcional (nula quando o banco não informou).</summary>
     private static string? ObterStringOpcional(MySqlDataReader leitor, int ordinal) =>
